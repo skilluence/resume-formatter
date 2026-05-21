@@ -1,0 +1,152 @@
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─── Claude-inspired Design Tokens ─── */
+@theme inline {
+  /* Fonts */
+  --font-serif: var(--font-lora);
+  --font-sans: var(--font-inter);
+
+  /* Claude surface scale */
+  --color-surface: #faf9f5;
+  --color-surface-secondary: #f5f4ed;
+  --color-surface-tertiary: #f0eee6;
+  --color-surface-dark: #1a1918;
+  --color-surface-dark-deep: #141413;
+
+  /* Clay accent */
+  --color-clay: #d97757;
+  --color-clay-interactive: #c96442;
+
+  /* Text hierarchy */
+  --color-on-surface: #141413;
+  --color-on-surface-secondary: #30302e;
+  --color-on-surface-tertiary: #5e5d59;
+  --color-on-surface-muted: #4d4c48;
+  --color-on-surface-subtle: #73726c;
+  --color-on-surface-ghost: #9c9a92;
+
+  /* Border scale */
+  --color-border-primary: #b0aea5;
+  --color-border-secondary: #d1cfc5;
+  --color-border-tertiary: #e8e6dc;
+
+  /* Dark surface text */
+  --color-on-dark: #faf9f5;
+  --color-on-dark-muted: #9c9a92;
+
+  /* Map to shadcn CSS variable names */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+}
+
+/* ─── Shadcn CSS variable overrides (Claude warm palette) ─── */
+:root {
+  --background: #faf9f5;
+  --foreground: #141413;
+  --card: #faf9f5;
+  --card-foreground: #141413;
+  --popover: #faf9f5;
+  --popover-foreground: #141413;
+  --primary: #c96442;
+  --primary-foreground: #faf9f5;
+  --secondary: #f5f4ed;
+  --secondary-foreground: #4d4c48;
+  --muted: #f5f4ed;
+  --muted-foreground: #73726c;
+  --accent: #f0eee6;
+  --accent-foreground: #141413;
+  --destructive: #b53333;
+  --border: #e8e6dc;
+  --input: #e8e6dc;
+  --ring: #d97757;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--border);
+    outline-color: color-mix(in srgb, var(--ring) 50%, transparent);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans, "Inter", system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Text selection highlight */
+  ::selection {
+    background-color: color-mix(in srgb, #d97757 30%, transparent);
+    color: #141413;
+  }
+}
+
+/* ─── Utility: clay button border-thickening hover ─── */
+@utility btn-clay {
+  background-color: #c96442;
+  color: #faf9f5;
+  border: 1px solid #c96442;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 15px;
+  line-height: 1.6;
+  transition: border-width 150ms ease, box-shadow 150ms ease;
+  cursor: pointer;
+}
+
+@utility btn-clay-hover {
+  border-width: 2px;
+  box-shadow: 0 2px 8px color-mix(in srgb, #c96442 30%, transparent);
+}
+
+@utility btn-primary {
+  background-color: #141413;
+  color: #faf9f5;
+  border: 1px solid #30302e;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 15px;
+  line-height: 1.6;
+  transition: background-color 150ms ease;
+  cursor: pointer;
+}
+
+@utility surface-warm {
+  background-color: #faf9f5;
+}
+
+@utility surface-stone {
+  background-color: #f5f4ed;
+}
+
+@utility surface-dark {
+  background-color: #1a1918;
+}
