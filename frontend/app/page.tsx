@@ -273,12 +273,12 @@ export default function Home() {
             gap: "10px",
           }}
         >
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
+          <Link href="/" className="flex items-center gap-2.5 no-underline min-w-0">
             <AsteriskMark size={18} color={tk.clay} />
             <span
+              className="truncate text-[15px] sm:text-base"
               style={{
                 fontFamily: tk.serif,
-                fontSize: "16px",
                 fontWeight: 500,
                 color: tk.onSurface,
                 letterSpacing: "-0.01em",
@@ -382,11 +382,11 @@ export default function Home() {
 
             {/* ─────── Upload Card ─────── */}
             <div
+              className="p-4 sm:p-6"
               style={{
                 backgroundColor: "#ffffff",
                 border: `1px solid ${tk.borderTertiary}`,
                 borderRadius: "16px",
-                padding: "26px",
                 boxShadow: "rgba(20, 20, 19, 0.04) 0px 2px 6px, rgba(20, 20, 19, 0.02) 0px 8px 24px",
                 display: "flex",
                 flexDirection: "column",
@@ -652,13 +652,12 @@ export default function Home() {
             {/* ─── Result Card ─── */}
             {stage === "done" && result && (
               <div
-                className="animate-in fade-in slide-in-from-bottom-4 duration-300"
+                className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-4 sm:p-6"
                 style={{
                   marginTop: "16px",
                   backgroundColor: tk.surfaceSecondary,
                   border: `1px solid ${tk.borderTertiary}`,
                   borderRadius: "16px",
-                  padding: "24px",
                   display: "flex",
                   flexDirection: "column",
                   gap: "18px",

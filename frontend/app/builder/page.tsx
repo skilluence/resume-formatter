@@ -241,11 +241,11 @@ function SectionCard({
 }) {
   return (
     <section
+      className="p-4 sm:p-6"
       style={{
         backgroundColor: "#ffffff",
         border: `1px solid ${tk.borderTertiary}`,
         borderRadius: "14px",
-        padding: "22px 24px",
         display: "flex",
         flexDirection: "column",
         gap: "16px",
@@ -496,7 +496,7 @@ export default function BuilderPage() {
     const remove = removeAt(set);
     return (
       <Row key={idx} onRemove={() => remove(idx)}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Degree">
             <TextInput value={row.degree} onChange={(e) => update(idx, { degree: e.target.value })} placeholder="B.Tech in Computer Science" />
           </Field>
@@ -519,7 +519,7 @@ export default function BuilderPage() {
     const remove = removeAt(set);
     return (
       <Row key={idx} onRemove={() => remove(idx)}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Job title">
             <TextInput value={row.title} onChange={(e) => update(idx, { title: e.target.value })} placeholder="Software Engineer" />
           </Field>
@@ -529,7 +529,7 @@ export default function BuilderPage() {
           <Field label="City">
             <TextInput value={row.city} onChange={(e) => update(idx, { city: e.target.value })} placeholder="Bengaluru" />
           </Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <div className="grid grid-cols-2 gap-3">
             <Field label="Start" hint="Jun 2023">
               <TextInput value={row.start_date} onChange={(e) => update(idx, { start_date: e.target.value })} placeholder="Jun 2023" />
             </Field>
@@ -555,7 +555,7 @@ export default function BuilderPage() {
     const remove = removeAt(set);
     return (
       <Row key={idx} onRemove={() => remove(idx)}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Project name">
             <TextInput value={row.name} onChange={(e) => update(idx, { name: e.target.value })} placeholder="Resume Formatter" />
           </Field>
@@ -580,7 +580,7 @@ export default function BuilderPage() {
     const remove = removeAt(set);
     return (
       <Row key={idx} onRemove={() => remove(idx)}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Name">
             <TextInput value={row.name} onChange={(e) => update(idx, { name: e.target.value })} placeholder="AWS Solutions Architect" />
           </Field>
@@ -612,9 +612,12 @@ export default function BuilderPage() {
         }}
       >
         <div style={{ maxWidth: "900px", margin: "0 auto", width: "100%", display: "flex", alignItems: "center", gap: "10px" }}>
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
+          <Link href="/" className="flex items-center gap-2.5 no-underline min-w-0">
             <AsteriskMark size={18} color={tk.clay} />
-            <span style={{ fontFamily: tk.serif, fontSize: "16px", fontWeight: 500, color: tk.onSurface, letterSpacing: "-0.01em" }}>
+            <span
+              className="truncate text-[15px] sm:text-base"
+              style={{ fontFamily: tk.serif, fontWeight: 500, color: tk.onSurface, letterSpacing: "-0.01em" }}
+            >
               Resume Formatter
             </span>
           </Link>
@@ -681,7 +684,7 @@ export default function BuilderPage() {
         <div style={{ maxWidth: "720px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "14px" }}>
 
           <SectionCard index={1} title="Personal" subtitle="Name and domain are required. The rest is optional but helps the AI write a stronger resume.">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div data-field="name">
                 <Field label="Full name" required error={showErr("name")}>
                   <TextInput
@@ -749,7 +752,7 @@ export default function BuilderPage() {
                   />
                 </Field>
               </div>
-              <div style={{ gridColumn: "span 2" }}>
+              <div className="sm:col-span-2">
                 <Field label="Current location">
                   <TextInput value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Mumbai, India" />
                 </Field>
@@ -877,13 +880,12 @@ export default function BuilderPage() {
           {/* Result */}
           {result && (
             <div
-              className="animate-in fade-in slide-in-from-bottom-4 duration-300"
+              className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-4 sm:p-6"
               style={{
                 marginTop: "8px",
                 backgroundColor: tk.surfaceSecondary,
                 border: `1px solid ${tk.borderTertiary}`,
                 borderRadius: "16px",
-                padding: "24px",
                 display: "flex",
                 flexDirection: "column",
                 gap: "20px",
