@@ -8,10 +8,12 @@ import copy
 
 FONT_NAME = "Calibri"
 NAME_SIZE = Pt(16)
+TITLE_SIZE = Pt(10.5)
 BODY_SIZE = Pt(9)
 HEADER_SIZE = Pt(9.5)
 MARGIN = Inches(0.20)
 COBALT_BLUE = RGBColor(0, 71, 171)
+TITLE_GREY = RGBColor(80, 80, 80)
 
 
 def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
@@ -44,6 +46,16 @@ def _add_name(doc, name: str):
     run.font.name = FONT_NAME
     run.font.size = NAME_SIZE
     run.font.color.rgb = COBALT_BLUE
+
+
+def _add_title(doc, title: str):
+    p = doc.add_paragraph()
+    _set_spacing(p, before=0, after=2)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(title)
+    run.font.name = FONT_NAME
+    run.font.size = TITLE_SIZE
+    run.font.color.rgb = TITLE_GREY
 
 
 def _add_hyperlink(paragraph, text: str, url: str):
@@ -205,6 +217,10 @@ def format_compact(data: dict, output_path: str):
 
     # Name
     _add_name(doc, data.get("name", ""))
+
+    # Professional title (under name)
+    if data.get("professional_title"):
+        _add_title(doc, data["professional_title"])
 
     # Contact
     if data.get("contact"):

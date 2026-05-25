@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, CSSProperties } from "react";
+import Link from "next/link";
 import axios from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -270,46 +271,51 @@ export default function Home() {
             gap: "10px",
           }}
         >
-          <AsteriskMark size={18} color={tk.clay} />
-          <span
-            style={{
-              fontFamily: tk.serif,
-              fontSize: "16px",
-              fontWeight: 500,
-              color: tk.onSurface,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Resume Formatter
-          </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
+            <AsteriskMark size={18} color={tk.clay} />
             <span
               style={{
-                fontFamily: tk.sans,
-                fontSize: "12px",
-                backgroundColor: tk.surfaceSecondary,
-                color: tk.onSurfaceTertiary,
-                border: `1px solid ${tk.borderTertiary}`,
-                borderRadius: "6px",
-                padding: "4px 10px",
+                fontFamily: tk.serif,
+                fontSize: "16px",
+                fontWeight: 500,
+                color: tk.onSurface,
+                letterSpacing: "-0.01em",
               }}
             >
-              ATS-ready
+              Resume Formatter
             </span>
-            <span
+          </Link>
+          <nav style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
+            <Link
+              href="/"
               style={{
                 fontFamily: tk.sans,
-                fontSize: "12px",
-                backgroundColor: tk.surfaceSecondary,
-                color: tk.onSurfaceTertiary,
-                border: `1px solid ${tk.borderTertiary}`,
+                fontSize: "13px",
+                fontWeight: 500,
+                color: tk.clayInteractive,
+                backgroundColor: "color-mix(in srgb, #c96442 10%, white)",
+                textDecoration: "none",
+                padding: "6px 12px",
                 borderRadius: "6px",
-                padding: "4px 10px",
               }}
             >
-              Instant
-            </span>
-          </div>
+              Format
+            </Link>
+            <Link
+              href="/builder"
+              style={{
+                fontFamily: tk.sans,
+                fontSize: "13px",
+                fontWeight: 500,
+                color: tk.onSurfaceTertiary,
+                textDecoration: "none",
+                padding: "6px 12px",
+                borderRadius: "6px",
+              }}
+            >
+              Build
+            </Link>
+          </nav>
         </div>
       </header>
 

@@ -12,6 +12,7 @@ SYSTEM_PROMPT = """You are a resume parser. Extract all information from the res
 Return this exact structure:
 {
   "name": "string",
+  "professional_title": "string or null",
   "contact": {
     "phone": "string or null",
     "email": "string or null",
@@ -59,6 +60,7 @@ Return this exact structure:
 Rules:
 - Keep all bullet points exactly as written, do not summarize or shorten.
 - If a field is missing, use null.
+- professional_title: if the resume shows a tagline/title below the name (e.g. "Software Engineer", "Data Scientist"), extract it. Otherwise null.
 - skills should group by category if categories exist, otherwise use a single key "General".
 - Return ONLY the JSON object, nothing else.
 """
