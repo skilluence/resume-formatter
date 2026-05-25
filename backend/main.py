@@ -117,7 +117,15 @@ def download_pdf(job_id: str):
     if not os.path.exists(pdf_path):
         try:
             from docx2pdf import convert
-            convert(docx_path, pdf_path)
+            if os.name == "nt":
+                import pythoncom
+                pythoncom.CoInitialize()
+                try:
+                    convert(docx_path, pdf_path)
+                finally:
+                    pythoncom.CoUninitialize()
+            else:
+                convert(docx_path, pdf_path)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"PDF conversion failed: {str(e)}")
 
