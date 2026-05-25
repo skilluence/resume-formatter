@@ -531,21 +531,24 @@ export default function Home() {
                 <div
                   style={{
                     width: "100%",
-                    padding: "12px",
                     borderRadius: "8px",
                     border: `1px solid color-mix(in srgb, #c96442 35%, transparent)`,
                     backgroundColor: "color-mix(in srgb, #c96442 7%, white)",
-                    color: tk.clayInteractive,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "10px",
-                    fontFamily: tk.sans,
-                    fontSize: "14px",
                   }}
                 >
-                  <IconSpinner size={16} />
-                  {stage === "uploading" ? "Uploading resume…" : "Formatting with AI…"}
+                  <div className="loader-wrapper" aria-label="Generating">
+                    <span className="loader-letter">G</span>
+                    <span className="loader-letter">e</span>
+                    <span className="loader-letter">n</span>
+                    <span className="loader-letter">e</span>
+                    <span className="loader-letter">r</span>
+                    <span className="loader-letter">a</span>
+                    <span className="loader-letter">t</span>
+                    <span className="loader-letter">i</span>
+                    <span className="loader-letter">n</span>
+                    <span className="loader-letter">g</span>
+                    <div className="loader" />
+                  </div>
                 </div>
               )}
 
