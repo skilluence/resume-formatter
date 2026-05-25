@@ -254,7 +254,9 @@ export default function Home() {
         className="sticky top-0 z-50"
         style={{
           height: "64px",
-          backgroundColor: tk.surface,
+          backgroundColor: "color-mix(in srgb, #faf9f5 92%, transparent)",
+          backdropFilter: "saturate(180%) blur(10px)",
+          WebkitBackdropFilter: "saturate(180%) blur(10px)",
           borderBottom: `1px solid ${tk.borderTertiary}`,
           display: "flex",
           alignItems: "center",
@@ -335,6 +337,20 @@ export default function Home() {
 
             {/* Headline */}
             <div style={{ textAlign: "center", marginBottom: "40px" }}>
+              <span
+                style={{
+                  fontFamily: tk.sans,
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  letterSpacing: "0.14em",
+                  color: tk.clay,
+                  textTransform: "uppercase",
+                  display: "inline-block",
+                  marginBottom: "14px",
+                }}
+              >
+                Format Existing Resume
+              </span>
               <h1
                 style={{
                   fontFamily: tk.serif,
@@ -342,7 +358,7 @@ export default function Home() {
                   fontWeight: 500,
                   color: tk.onSurface,
                   lineHeight: 1.1,
-                  letterSpacing: "-0.01em",
+                  letterSpacing: "-0.015em",
                   marginBottom: "16px",
                 }}
               >
@@ -370,8 +386,8 @@ export default function Home() {
                 backgroundColor: "#ffffff",
                 border: `1px solid ${tk.borderTertiary}`,
                 borderRadius: "16px",
-                padding: "24px",
-                boxShadow: "rgba(0,0,0,0.06) 0px 4px 20px",
+                padding: "26px",
+                boxShadow: "rgba(20, 20, 19, 0.04) 0px 2px 6px, rgba(20, 20, 19, 0.02) 0px 8px 24px",
                 display: "flex",
                 flexDirection: "column",
                 gap: "18px",
@@ -565,16 +581,18 @@ export default function Home() {
                   disabled={!canSubmit}
                   style={{
                     width: "100%",
-                    padding: "12px 18px",
-                    borderRadius: "8px",
+                    padding: "13px 18px",
+                    borderRadius: "10px",
                     backgroundColor: canSubmit ? tk.clayInteractive : tk.surfaceSecondary,
                     color: canSubmit ? "#faf9f5" : tk.onSurfaceGhost,
                     border: `1px solid ${canSubmit ? tk.clayInteractive : tk.borderTertiary}`,
                     fontFamily: tk.sans,
                     fontSize: "15px",
                     fontWeight: 500,
+                    letterSpacing: "0.005em",
                     cursor: canSubmit ? "pointer" : "not-allowed",
-                    transition: "border-width 0.15s ease, box-shadow 0.15s ease",
+                    transition: "transform 0.12s ease, box-shadow 0.15s ease",
+                    boxShadow: canSubmit ? "0 1px 2px color-mix(in srgb, #c96442 25%, transparent)" : "none",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -582,14 +600,12 @@ export default function Home() {
                   }}
                   onMouseEnter={(e) => {
                     if (!canSubmit) return;
-                    const el = e.currentTarget;
-                    el.style.borderWidth = "2px";
-                    el.style.boxShadow = "0 3px 12px color-mix(in srgb, #c96442 28%, transparent)";
+                    e.currentTarget.style.boxShadow = "0 4px 14px color-mix(in srgb, #c96442 32%, transparent)";
+                    e.currentTarget.style.transform = "translateY(-1px)";
                   }}
                   onMouseLeave={(e) => {
-                    const el = e.currentTarget;
-                    el.style.borderWidth = "1px";
-                    el.style.boxShadow = "none";
+                    e.currentTarget.style.boxShadow = canSubmit ? "0 1px 2px color-mix(in srgb, #c96442 25%, transparent)" : "none";
+                    e.currentTarget.style.transform = "translateY(0)";
                   }}
                 >
                   Format Resume
@@ -701,8 +717,8 @@ export default function Home() {
                       alignItems: "center",
                       justifyContent: "center",
                       gap: "7px",
-                      padding: "11px",
-                      borderRadius: "8px",
+                      padding: "12px",
+                      borderRadius: "10px",
                       backgroundColor: "#ffffff",
                       color: tk.clayInteractive,
                       border: `1px solid ${tk.clayInteractive}`,
@@ -732,8 +748,8 @@ export default function Home() {
                       alignItems: "center",
                       justifyContent: "center",
                       gap: "7px",
-                      padding: "11px",
-                      borderRadius: "8px",
+                      padding: "12px",
+                      borderRadius: "10px",
                       backgroundColor: tk.clayInteractive,
                       color: "#faf9f5",
                       border: `1px solid ${tk.clayInteractive}`,
@@ -741,16 +757,15 @@ export default function Home() {
                       fontSize: "14px",
                       fontWeight: 500,
                       cursor: "pointer",
-                      transition: "border-width 0.15s ease, box-shadow 0.15s ease",
+                      transition: "transform 0.12s ease, box-shadow 0.15s ease",
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderWidth = "2px";
-                      e.currentTarget.style.boxShadow =
-                        "0 2px 8px color-mix(in srgb, #c96442 30%, transparent)";
+                      e.currentTarget.style.boxShadow = "0 4px 14px color-mix(in srgb, #c96442 32%, transparent)";
+                      e.currentTarget.style.transform = "translateY(-1px)";
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderWidth = "1px";
                       e.currentTarget.style.boxShadow = "none";
+                      e.currentTarget.style.transform = "translateY(0)";
                     }}
                   >
                     <IconDownload size={14} />
