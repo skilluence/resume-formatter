@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, CSSProperties } from "react";
+import { useState, useRef, useCallback, useEffect, CSSProperties } from "react";
 import axios from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -83,14 +83,6 @@ function IconFile({ size = 32 }: { size?: number }) {
     </svg>
   );
 }
-function IconSpinner({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className="animate-spin">
-      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-    </svg>
-  );
-}
 
 /* ─── Small reusable styled chip ─── */
 function Chip({ label }: { label: string }) {
@@ -164,6 +156,159 @@ function StepCard({ step, title, desc }: { step: string; title: string; desc: st
   );
 }
 
+/* ─── Claude-style cycling status words (50+) ───
+   Whimsical gerunds that rotate every ~1.9s while the request is in
+   flight — the orange shimmer equivalent of Claude's "Scheming…". */
+const THINKING_WORDS = [
+  "Scheming", "Cooking", "Creating", "Brewing", "Crafting", "Conjuring",
+  "Formatting", "Structuring", "Parsing", "Polishing", "Organizing", "Aligning",
+  "Distilling", "Refining", "Assembling", "Composing", "Curating", "Tidying",
+  "Arranging", "Calibrating", "Finessing", "Sculpting", "Weaving", "Stitching",
+  "Shaping", "Honing", "Buffing", "Smoothing", "Tailoring", "Untangling",
+  "Decoding", "Digesting", "Synthesizing", "Summarizing", "Mapping", "Sorting",
+  "Indexing", "Cataloguing", "Highlighting", "Beautifying", "Optimizing",
+  "Streamlining", "Perfecting", "Wordsmithing", "Typesetting", "Garnishing",
+  "Plating", "Marinating", "Simmering", "Percolating", "Tinkering", "Pondering",
+  "Mulling", "Computing", "Crunching", "Wrangling", "Massaging", "Sprucing",
+  "Noodling", "Finalizing", "Magicking", "Bedazzling",
+] as const;
+
+/* ─── Twinkling sparkle mark (the "✦" before the status word) ─── */
+function SparkleMark({ size = 16, color = tk.clay }: { size?: number; color?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={color}
+      className="animate-sparkle-twinkle"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M12 0c.45 5.7 1.95 8.2 4.65 9.45C18.9 10.45 21.1 11.45 24 12c-2.9.55-5.1 1.55-7.35 2.55C13.95 15.8 12.45 18.3 12 24c-.45-5.7-1.95-8.2-4.65-9.45C5.1 13.55 2.9 12.55 0 12c2.9-.55 5.1-1.55 7.35-2.55C10.05 8.2 11.55 5.7 12 0z" />
+    </svg>
+  );
+}
+
+/* three breathing dots that trail the cycling word */
+function AnimatedDots() {
+  return (
+    <span style={{ display: "inline-flex", gap: "3px", marginLeft: "3px", verticalAlign: "middle" }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="animate-dot-blink"
+          style={{
+            width: "4px",
+            height: "4px",
+            borderRadius: "50%",
+            backgroundColor: tk.clayInteractive,
+            display: "inline-block",
+            animationDelay: `${i * 0.18}s`,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/* ─── Claude-style "thinking" loader: 0→100% bar + cycling orange word ─── */
+function ThinkingIndicator({ progress }: { progress: number }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setI((v) => (v + 1) % THINKING_WORDS.length);
+    }, 1900);
+    return () => clearInterval(id);
+  }, []);
+  const word = THINKING_WORDS[i];
+  const pct = Math.round(progress);
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        borderRadius: "12px",
+        border: `1px solid ${tk.borderTertiary}`,
+        backgroundColor: tk.surfaceSecondary,
+        padding: "24px 20px 22px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "16px",
+        overflow: "hidden",
+      }}
+    >
+      {/* cycling status line — the orange "✦ Scheming…" */}
+      <div style={{ display: "flex", alignItems: "center", gap: "9px", minHeight: "30px" }}>
+        <SparkleMark size={17} color={tk.clay} />
+        <span key={word} className="animate-word-in" style={{ display: "inline-block" }}>
+          <span
+            className="shimmer-text"
+            style={{
+              fontFamily: tk.sans,
+              fontSize: "20px",
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {word}
+          </span>
+        </span>
+        <AnimatedDots />
+      </div>
+
+      {/* determinate 0 → 100% progress bar */}
+      <div style={{ width: "100%" }}>
+        <div
+          style={{
+            position: "relative",
+            height: "8px",
+            width: "100%",
+            borderRadius: "999px",
+            backgroundColor: tk.surfaceTertiary,
+            border: `1px solid ${tk.borderTertiary}`,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${progress}%`,
+              borderRadius: "999px",
+              background: `linear-gradient(90deg, ${tk.clay}, ${tk.clayInteractive})`,
+              transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "8px",
+          }}
+        >
+          <span style={{ fontFamily: tk.sans, fontSize: "12px", color: tk.onSurfaceGhost }}>
+            Reading every section &amp; detail…
+          </span>
+          <span
+            style={{
+              fontFamily: tk.sans,
+              fontSize: "13px",
+              fontWeight: 600,
+              color: tk.clayInteractive,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {pct}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════
    MAIN PAGE
 ═══════════════════════════════════════════ */
@@ -172,6 +317,7 @@ export default function Home() {
   const [plainText, setPlainText] = useState("");
   const [inputMode, setInputMode] = useState<"file" | "text">("file");
   const [stage, setStage] = useState<Stage>("idle");
+  const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -190,6 +336,7 @@ export default function Home() {
     setStage("uploading");
     setError("");
     setResult(null);
+    setProgress(0);
 
     const formData = new FormData();
     if (file) formData.append("file", file);
@@ -200,7 +347,9 @@ export default function Home() {
       setStage("formatting");
       const res = await axios.post(`${API_URL}/format`, formData);
       setResult(res.data);
-      setStage("done");
+      setProgress(100);
+      // let the bar visibly fill to 100% before revealing the result
+      setTimeout(() => setStage("done"), 450);
     } catch (err: unknown) {
       const message = axios.isAxiosError(err)
         ? err.response?.data?.detail || "Something went wrong."
@@ -210,21 +359,42 @@ export default function Home() {
     }
   };
 
-  const downloadFile = (format: "docx" | "pdf") => {
+  const downloadDocx = () => {
     if (!result) return;
-    window.open(`${API_URL}/download/${result.job_id}/${format}`, "_blank");
+    window.open(`${API_URL}/download/${result.job_id}/docx`, "_blank");
   };
 
   const reset = () => {
     setFile(null);
     setPlainText("");
     setStage("idle");
+    setProgress(0);
     setResult(null);
     setError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const clearFile = () => {
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const isLoading = stage === "uploading" || stage === "formatting";
   const canSubmit = !isLoading && (!!file || !!plainText.trim());
+
+  /* Simulated 0→100% progress: the backend reports no progress events, so we
+     ease toward ~90% while the request is in flight; handleFormat snaps it to
+     100% on success. The `p >= 90` guard keeps the 100% set-on-success from
+     being pulled back down by this interval. */
+  useEffect(() => {
+    if (!isLoading) return;
+    const id = setInterval(() => {
+      setProgress((p) =>
+        p >= 90 ? p : Math.min(90, p + Math.max(0.5, (90 - p) * 0.06))
+      );
+    }, 150);
+    return () => clearInterval(id);
+  }, [isLoading]);
 
   /* ─── Drop zone styles (dynamic) ─── */
   const dropZoneStyle: CSSProperties = {
@@ -354,7 +524,7 @@ export default function Home() {
                 }}
               >
                 Upload an unformatted resume — get back a clean, ATS-optimized
-                DOCX &amp; PDF in seconds.
+                DOCX in seconds.
               </p>
             </div>
 
@@ -461,6 +631,37 @@ export default function Home() {
                       >
                         {(file.size / 1024).toFixed(1)} KB · click to change
                       </p>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearFile();
+                        }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          marginTop: "2px",
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          fontFamily: tk.sans,
+                          fontSize: "12px",
+                          fontWeight: 500,
+                          color: tk.onSurfaceGhost,
+                          cursor: "pointer",
+                          transition: "color 0.2s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = tk.clayInteractive;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = tk.onSurfaceGhost;
+                        }}
+                      >
+                        <span style={{ fontSize: "14px", lineHeight: 1 }}>×</span>
+                        Remove file
+                      </button>
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
@@ -526,28 +727,8 @@ export default function Home() {
                 />
               )}
 
-              {/* Loading indicator */}
-              {isLoading && (
-                <div
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    borderRadius: "8px",
-                    border: `1px solid color-mix(in srgb, #c96442 35%, transparent)`,
-                    backgroundColor: "color-mix(in srgb, #c96442 7%, white)",
-                    color: tk.clayInteractive,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "10px",
-                    fontFamily: tk.sans,
-                    fontSize: "14px",
-                  }}
-                >
-                  <IconSpinner size={16} />
-                  {stage === "uploading" ? "Uploading resume…" : "Formatting with AI…"}
-                </div>
-              )}
+              {/* Claude-style cycling loading indicator */}
+              {isLoading && <ThinkingIndicator progress={progress} />}
 
               {/* CTA Button */}
               {(stage === "idle" || stage === "error") && (
@@ -617,7 +798,7 @@ export default function Home() {
                     paddingTop: "2px",
                   }}
                 >
-                  {["PDF", "DOCX", "ATS-ready", "AI-powered", "Instant"].map((label) => (
+                  {["DOCX", "ATS-ready", "AI-powered", "Instant"].map((label) => (
                     <Chip key={label} label={label} />
                   ))}
                 </div>
@@ -682,93 +863,72 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Download buttons */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                  {/* DOCX – outlined */}
-                  <button
-                    onClick={() => downloadFile("docx")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "7px",
-                      padding: "11px",
-                      borderRadius: "8px",
-                      backgroundColor: "#ffffff",
-                      color: tk.clayInteractive,
-                      border: `1px solid ${tk.clayInteractive}`,
-                      fontFamily: tk.sans,
-                      fontSize: "14px",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      transition: "background-color 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor =
-                        "color-mix(in srgb, #c96442 8%, white)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = "#ffffff";
-                    }}
-                  >
-                    <IconDownload size={14} />
-                    Download DOCX
-                  </button>
-
-                  {/* PDF – filled clay */}
-                  <button
-                    onClick={() => downloadFile("pdf")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "7px",
-                      padding: "11px",
-                      borderRadius: "8px",
-                      backgroundColor: tk.clayInteractive,
-                      color: "#faf9f5",
-                      border: `1px solid ${tk.clayInteractive}`,
-                      fontFamily: tk.sans,
-                      fontSize: "14px",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      transition: "border-width 0.15s ease, box-shadow 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderWidth = "2px";
-                      e.currentTarget.style.boxShadow =
-                        "0 2px 8px color-mix(in srgb, #c96442 30%, transparent)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderWidth = "1px";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
-                  >
-                    <IconDownload size={14} />
-                    Download PDF
-                  </button>
-                </div>
+                {/* Download — single full-width DOCX action */}
+                <button
+                  onClick={downloadDocx}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    backgroundColor: tk.clayInteractive,
+                    color: "#faf9f5",
+                    border: `1px solid ${tk.clayInteractive}`,
+                    fontFamily: tk.sans,
+                    fontSize: "15px",
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    transition: "border-width 0.15s ease, box-shadow 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderWidth = "2px";
+                    e.currentTarget.style.boxShadow =
+                      "0 2px 8px color-mix(in srgb, #c96442 30%, transparent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderWidth = "1px";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
+                >
+                  <IconDownload size={15} />
+                  Download DOCX
+                </button>
 
                 <button
                   onClick={reset}
                   style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    padding: "12px",
+                    borderRadius: "8px",
                     background: "none",
-                    border: "none",
+                    border: `1px solid ${tk.borderSecondary}`,
                     fontFamily: tk.sans,
-                    fontSize: "12px",
-                    color: tk.onSurfaceGhost,
+                    fontSize: "14px",
+                    fontWeight: 500,
+                    color: tk.onSurfaceTertiary,
                     cursor: "pointer",
-                    transition: "color 0.2s ease",
-                    padding: 0,
+                    transition: "border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease",
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.color = tk.onSurfaceTertiary;
+                    e.currentTarget.style.borderColor = tk.onSurfaceGhost;
+                    e.currentTarget.style.color = tk.onSurface;
+                    e.currentTarget.style.backgroundColor = tk.surface;
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.color = tk.onSurfaceGhost;
+                    e.currentTarget.style.borderColor = tk.borderSecondary;
+                    e.currentTarget.style.color = tk.onSurfaceTertiary;
+                    e.currentTarget.style.backgroundColor = "transparent";
                   }}
                 >
-                  Format another resume →
+                  <IconUpload size={15} />
+                  Format another resume
                 </button>
               </div>
             )}
@@ -816,7 +976,7 @@ export default function Home() {
               <StepCard
                 step="03"
                 title="Download instantly"
-                desc="Get a polished ATS-ready DOCX and PDF ready for submission."
+                desc="Get a polished ATS-ready DOCX ready for submission."
               />
             </div>
           </div>

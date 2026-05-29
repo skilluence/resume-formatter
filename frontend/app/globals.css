@@ -150,3 +150,156 @@
 @utility surface-dark {
   background-color: #1a1918;
 }
+
+/* ─── Processing step indicator animations ─── */
+@keyframes step-pop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes step-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-step-pop {
+  animation: step-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@utility animate-step-row-in {
+  animation: step-row-in 0.35s ease both;
+}
+
+/* pulsing glow ring around the active step node */
+@keyframes step-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(201, 100, 66, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(201, 100, 66, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(201, 100, 66, 0);
+  }
+}
+
+@utility animate-step-pulse {
+  animation: step-pulse 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* flowing dashes travelling down the connector while a step is in flight */
+@keyframes connector-flow {
+  to {
+    background-position: 0 -16px;
+  }
+}
+
+@utility animate-connector-flow {
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-clay-interactive, #c96442) 0,
+    var(--color-clay-interactive, #c96442) 50%,
+    transparent 50%,
+    transparent 100%
+  );
+  background-size: 2px 16px;
+  background-repeat: repeat-y;
+  animation: connector-flow 0.9s linear infinite;
+}
+
+/* breathing dots after the active caption */
+@keyframes dot-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
+@utility animate-dot-blink {
+  animation: dot-blink 1.4s ease-in-out infinite;
+}
+
+/* ─── Claude-style "thinking" loader (cycling word + progress bar) ─── */
+
+/* orange light sweeping across the cycling status word */
+@keyframes thinking-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -150% 0;
+  }
+}
+
+@utility shimmer-text {
+  background-image: linear-gradient(
+    100deg,
+    #c96442 0%,
+    #c96442 38%,
+    #f0a877 50%,
+    #c96442 62%,
+    #c96442 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: thinking-shimmer 2.2s linear infinite;
+}
+
+/* each new word fades, lifts and sharpens into place */
+@keyframes word-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    filter: blur(1.5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@utility animate-word-in {
+  animation: word-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* twinkling sparkle mark before the word */
+@keyframes sparkle-twinkle {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.25) rotate(45deg);
+    opacity: 1;
+  }
+}
+
+@utility animate-sparkle-twinkle {
+  animation: sparkle-twinkle 1.8s ease-in-out infinite;
+}

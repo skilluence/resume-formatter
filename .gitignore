@@ -18,6 +18,12 @@ outputs/
 frontend/node_modules/
 frontend/.next/
 
+# Build caches & tool artifacts
+*.tsbuildinfo
+backend/package-lock.json
+.playwright-mcp/
+
 # OS
 .DS_Store
 Thumbs.db
+demoResume

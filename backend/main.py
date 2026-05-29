@@ -90,7 +90,6 @@ async def format_resume(
         "job_id": job_id,
         "candidate_name": candidate_name,
         "docx_url": f"/download/{job_id}/docx",
-        "pdf_url": f"/download/{job_id}/pdf",
     })
 
 
@@ -103,26 +102,4 @@ def download_docx(job_id: str):
         path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=f"{job_id}.docx",
-    )
-
-
-@app.get("/download/{job_id}/pdf")
-def download_pdf(job_id: str):
-    docx_path = os.path.join(OUTPUT_DIR, f"{job_id}.docx")
-    pdf_path = os.path.join(OUTPUT_DIR, f"{job_id}.pdf")
-
-    if not os.path.exists(docx_path):
-        raise HTTPException(status_code=404, detail="Source DOCX not found.")
-
-    if not os.path.exists(pdf_path):
-        try:
-            from docx2pdf import convert
-            convert(docx_path, pdf_path)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"PDF conversion failed: {str(e)}")
-
-    return FileResponse(
-        pdf_path,
-        media_type="application/pdf",
-        filename=f"{job_id}.pdf",
     )

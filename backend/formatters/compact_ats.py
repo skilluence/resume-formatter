@@ -1,5 +1,5 @@
 from docx import Document
-from docx.shared import Pt, Inches, RGBColor
+from docx.shared import Pt, Inches, Mm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -12,6 +12,13 @@ BODY_SIZE = Pt(9)
 HEADER_SIZE = Pt(9.5)
 MARGIN = Inches(0.20)
 COBALT_BLUE = RGBColor(0, 71, 171)
+HEADLINE_GRAY = RGBColor(64, 64, 64)
+
+# A4 page (210 mm wide). Right-align tab stops sit at the page width minus the
+# two side margins, expressed in twips (1 inch = 1440 twips).
+A4_WIDTH = Mm(210)
+A4_HEIGHT = Mm(297)
+USABLE_WIDTH_TWIPS = int((210 / 25.4 - 2 * 0.20) * 1440)
 
 
 def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
@@ -29,6 +36,8 @@ def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
 
 def _set_margins(doc):
     section = doc.sections[0]
+    section.page_width = A4_WIDTH
+    section.page_height = A4_HEIGHT
     section.top_margin = MARGIN
     section.bottom_margin = MARGIN
     section.left_margin = MARGIN
@@ -44,6 +53,18 @@ def _add_name(doc, name: str):
     run.font.name = FONT_NAME
     run.font.size = NAME_SIZE
     run.font.color.rgb = COBALT_BLUE
+
+
+def _add_headline(doc, headline: str):
+    """The professional title line shown directly under the name (e.g.
+    'Data Analyst | BI Analyst'). Subordinate to the name: smaller and muted."""
+    p = doc.add_paragraph()
+    _set_spacing(p, before=0, after=2)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(headline)
+    run.font.name = FONT_NAME
+    run.font.size = Pt(10.5)
+    run.font.color.rgb = HEADLINE_GRAY
 
 
 def _add_hyperlink(paragraph, text: str, url: str):
@@ -80,6 +101,26 @@ def _add_plain_run(paragraph, text: str):
     run.font.size = BODY_SIZE
 
 
+def _ensure_scheme(url: str) -> str:
+    """Add https:// only when no scheme is present — never doubles it up."""
+    url = url.strip()
+    if url.lower().startswith(("http://", "https://", "mailto:", "tel:")):
+        return url
+    return "https://" + url.lstrip("/")
+
+
+def _profile_url(raw: str, domain: str, handle_prefix: str) -> str:
+    """Build a clickable target for a profile that may be a full URL, a bare
+    domain path, or just a username/handle. The displayed text stays exactly
+    as the user wrote it — this only affects where the hyperlink points."""
+    raw = raw.strip()
+    low = raw.lower()
+    if low.startswith(("http://", "https://", "www.")) or domain in low:
+        return _ensure_scheme(raw)
+    # Bare username/handle — attach to the canonical profile path.
+    return f"https://{handle_prefix}{raw.lstrip('/')}"
+
+
 def _add_contact(doc, contact: dict):
     p = doc.add_paragraph()
     _set_spacing(p, before=0, after=2)
@@ -89,15 +130,22 @@ def _add_contact(doc, contact: dict):
     if contact.get("phone"):
         segments.append(("plain", contact["phone"], None))
     if contact.get("email"):
-        segments.append(("link", contact["email"], f"mailto:{contact['email']}"))
+        email = contact["email"].strip()
+        href = email if email.lower().startswith("mailto:") else f"mailto:{email}"
+        display = email[len("mailto:"):] if email.lower().startswith("mailto:") else email
+        segments.append(("link", display, href))
     if contact.get("linkedin"):
         raw = contact["linkedin"].strip()
-        url = raw if raw.startswith("http") else f"https://www.linkedin.com/in/{raw}"
-        segments.append(("link", raw, url))
+        segments.append(("link", "LinkedIn", _profile_url(raw, "linkedin.com", "www.linkedin.com/in/")))
     if contact.get("github"):
         raw = contact["github"].strip()
-        url = raw if raw.startswith("http") else f"https://github.com/{raw}"
-        segments.append(("link", raw, url))
+        segments.append(("link", "GitHub", _profile_url(raw, "github.com", "github.com/")))
+    for link in contact.get("links") or []:
+        url = (link.get("url") or "").strip()
+        if not url:
+            continue
+        label = (link.get("label") or "").strip() or url
+        segments.append(("link", label, _ensure_scheme(url)))
     if contact.get("location"):
         segments.append(("plain", contact["location"], None))
 
@@ -151,7 +199,7 @@ def _add_job_header(doc, title: str, company: str, location: str, start: str, en
     pPr = p._p.get_or_add_pPr()
     tabs = OxmlElement("w:tabs")
     tab_stop = OxmlElement("w:tab")
-    usable_width = int((8.5 - 0.40) * 1440)  # twips
+    usable_width = USABLE_WIDTH_TWIPS
     tab_stop.set(qn("w:val"), "right")
     tab_stop.set(qn("w:pos"), str(usable_width))
     tabs.append(tab_stop)
@@ -194,6 +242,63 @@ def _add_skills(doc, skills: dict):
         run_items.font.size = BODY_SIZE
 
 
+def _add_prose(doc, text: str):
+    p = doc.add_paragraph()
+    _set_spacing(p, before=0, after=1)
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    run = p.add_run(text)
+    run.font.name = FONT_NAME
+    run.font.size = BODY_SIZE
+
+
+def _add_inline_items(doc, items: list):
+    p = doc.add_paragraph()
+    _set_spacing(p, before=0, after=1)
+    run = p.add_run(", ".join(items))
+    run.font.name = FONT_NAME
+    run.font.size = BODY_SIZE
+
+
+def _add_additional_sections(doc, sections: list):
+    """Render any non-standard resume heading captured by the parser.
+
+    Each section carries a free-form heading plus a `style` chosen by the
+    parser so we can format it like the closest standard section:
+      - "skills" -> inline comma-joined line (e.g. Languages, Tools)
+      - "list"   -> justified bullets
+      - "prose"  -> justified paragraph(s)
+    Nothing is dropped: unknown/blank styles fall back to whatever content exists.
+    """
+    for section in sections:
+        heading = (section.get("heading") or "").strip()
+        if not heading:
+            continue
+
+        items = section.get("items") or []
+        text = section.get("text")
+        style = (section.get("style") or "").strip().lower()
+
+        # Don't emit an empty header if there's genuinely no content.
+        if not items and not (text and text.strip()):
+            continue
+
+        _add_section_header(doc, heading)
+
+        if style == "prose" and text and text.strip():
+            _add_prose(doc, text.strip())
+        elif style == "skills" and items:
+            _add_inline_items(doc, items)
+        elif style == "list" and items:
+            for item in items:
+                _add_bullet(doc, item)
+        else:
+            # Fallback so no information is ever lost, even on an odd style.
+            if text and text.strip():
+                _add_prose(doc, text.strip())
+            for item in items:
+                _add_bullet(doc, item)
+
+
 def format_compact(data: dict, output_path: str):
     doc = Document()
     _set_margins(doc)
@@ -205,6 +310,10 @@ def format_compact(data: dict, output_path: str):
 
     # Name
     _add_name(doc, data.get("name", ""))
+
+    # Headline (professional title line under the name)
+    if data.get("headline"):
+        _add_headline(doc, data["headline"])
 
     # Contact
     if data.get("contact"):
@@ -258,41 +367,6 @@ def format_compact(data: dict, output_path: str):
             for bullet in project.get("bullets", []):
                 _add_bullet(doc, bullet)
 
-    # Education
-    if data.get("education"):
-        _add_section_header(doc, "Education")
-        for edu in data["education"]:
-            p = doc.add_paragraph()
-            _set_spacing(p, before=1, after=0)
-            run_deg = p.add_run(edu.get("degree", ""))
-            run_deg.bold = True
-            run_deg.font.name = FONT_NAME
-            run_deg.font.size = BODY_SIZE
-
-            tab = OxmlElement("w:tab")
-            run_deg._r.append(tab)
-
-            pPr = p._p.get_or_add_pPr()
-            tabs = OxmlElement("w:tabs")
-            tab_stop = OxmlElement("w:tab")
-            usable_width = int((8.5 - 0.40) * 1440)
-            tab_stop.set(qn("w:val"), "right")
-            tab_stop.set(qn("w:pos"), str(usable_width))
-            tabs.append(tab_stop)
-            pPr.append(tabs)
-
-            if edu.get("graduation_date"):
-                run_date = p.add_run(edu["graduation_date"])
-                run_date.bold = True
-                run_date.font.name = FONT_NAME
-                run_date.font.size = BODY_SIZE
-
-            p2 = doc.add_paragraph()
-            _set_spacing(p2, before=0, after=1)
-            run_inst = p2.add_run(edu.get("institution", ""))
-            run_inst.font.name = FONT_NAME
-            run_inst.font.size = BODY_SIZE
-
     # Certifications
     if data.get("certifications"):
         _add_section_header(doc, "Certifications")
@@ -313,7 +387,7 @@ def format_compact(data: dict, output_path: str):
                 pPr = p._p.get_or_add_pPr()
                 tabs = OxmlElement("w:tabs")
                 tab_stop = OxmlElement("w:tab")
-                usable_width = int((8.5 - 0.40) * 1440)
+                usable_width = USABLE_WIDTH_TWIPS
                 tab_stop.set(qn("w:val"), "right")
                 tab_stop.set(qn("w:pos"), str(usable_width))
                 tabs.append(tab_stop)
@@ -321,6 +395,47 @@ def format_compact(data: dict, output_path: str):
                 run_date = p.add_run(cert["date"])
                 run_date.font.name = FONT_NAME
                 run_date.font.size = BODY_SIZE
+            for bullet in cert.get("bullets", []):
+                _add_bullet(doc, bullet)
+
+    # Additional / non-standard sections (Awards, Languages, Publications, etc.)
+    if data.get("additional_sections"):
+        _add_additional_sections(doc, data["additional_sections"])
+
+    # Education — always rendered LAST.
+    if data.get("education"):
+        _add_section_header(doc, "Education")
+        for edu in data["education"]:
+            p = doc.add_paragraph()
+            _set_spacing(p, before=1, after=0)
+            run_deg = p.add_run(edu.get("degree", ""))
+            run_deg.bold = True
+            run_deg.font.name = FONT_NAME
+            run_deg.font.size = BODY_SIZE
+
+            tab = OxmlElement("w:tab")
+            run_deg._r.append(tab)
+
+            pPr = p._p.get_or_add_pPr()
+            tabs = OxmlElement("w:tabs")
+            tab_stop = OxmlElement("w:tab")
+            usable_width = USABLE_WIDTH_TWIPS
+            tab_stop.set(qn("w:val"), "right")
+            tab_stop.set(qn("w:pos"), str(usable_width))
+            tabs.append(tab_stop)
+            pPr.append(tabs)
+
+            if edu.get("graduation_date"):
+                run_date = p.add_run(edu["graduation_date"])
+                run_date.bold = True
+                run_date.font.name = FONT_NAME
+                run_date.font.size = BODY_SIZE
+
+            p2 = doc.add_paragraph()
+            _set_spacing(p2, before=0, after=1)
+            run_inst = p2.add_run(edu.get("institution", ""))
+            run_inst.font.name = FONT_NAME
+            run_inst.font.size = BODY_SIZE
 
     doc.save(output_path)
     print(f"Saved: {output_path}")
