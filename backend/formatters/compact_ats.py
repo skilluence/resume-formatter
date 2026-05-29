@@ -8,6 +8,7 @@ import copy
 
 FONT_NAME = "Calibri"
 NAME_SIZE = Pt(16)
+TITLE_SIZE = Pt(10.5)
 BODY_SIZE = Pt(9)
 HEADER_SIZE = Pt(9.5)
 MARGIN = Inches(0.20)
@@ -63,7 +64,7 @@ def _add_headline(doc, headline: str):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(headline)
     run.font.name = FONT_NAME
-    run.font.size = Pt(10.5)
+    run.font.size = TITLE_SIZE
     run.font.color.rgb = HEADLINE_GRAY
 
 

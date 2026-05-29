@@ -1,5 +1,6 @@
 # Environment
 .env
+.env.*
 *.env
 
 # Python
@@ -17,6 +18,7 @@ outputs/
 # Node
 frontend/node_modules/
 frontend/.next/
+frontend/tsconfig.tsbuildinfo
 
 # Build caches & tool artifacts
 *.tsbuildinfo

@@ -46,5 +46,5 @@ Monorepo:
 
 - `uploads/` and `outputs/` are **local disk** — ephemeral on Render/serverless (files vanish on restart).
 - `requirements.txt` lives at **`backend/requirements.txt`**, but `render.yaml` runs `pip install -r requirements.txt` from the repo root — watch this path mismatch.
-- **PDF support has been removed — DOCX only.** `docx2pdf` requires Microsoft Word and cannot run on Render's Linux host. Do **not** reintroduce `docx2pdf` or a Word/LibreOffice dependency.
+- **PDF export is supported via Docker + LibreOffice.** The repo `Dockerfile` installs `libreoffice`/`libreoffice-writer`, and `/download/{job_id}/pdf` converts the DOCX with `soffice --headless` on Linux (and `docx2pdf` only on Windows, `os.name == "nt"`). `render.yaml` deploys with `runtime: docker`, so the old "DOCX only / no LibreOffice" constraint no longer applies. Do not remove the PDF endpoint, the Dockerfile system deps, or the Docker runtime without removing the PDF buttons too.
 - The frontend `Result` type only uses `job_id` + `candidate_name`; the formatter must never drop or fabricate resume data — preserve every section, including unrecognised headings.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, CSSProperties } from "react";
+import Link from "next/link";
 import axios from "axios";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -359,9 +360,9 @@ export default function Home() {
     }
   };
 
-  const downloadDocx = () => {
+  const downloadFile = (format: "docx" | "pdf") => {
     if (!result) return;
-    window.open(`${API_URL}/download/${result.job_id}/docx`, "_blank");
+    window.open(`${API_URL}/download/${result.job_id}/${format}`, "_blank");
   };
 
   const reset = () => {
@@ -423,7 +424,9 @@ export default function Home() {
         className="sticky top-0 z-50"
         style={{
           height: "64px",
-          backgroundColor: tk.surface,
+          backgroundColor: "color-mix(in srgb, #faf9f5 92%, transparent)",
+          backdropFilter: "saturate(180%) blur(10px)",
+          WebkitBackdropFilter: "saturate(180%) blur(10px)",
           borderBottom: `1px solid ${tk.borderTertiary}`,
           display: "flex",
           alignItems: "center",
@@ -440,46 +443,51 @@ export default function Home() {
             gap: "10px",
           }}
         >
-          <AsteriskMark size={18} color={tk.clay} />
-          <span
-            style={{
-              fontFamily: tk.serif,
-              fontSize: "16px",
-              fontWeight: 500,
-              color: tk.onSurface,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Resume Formatter
-          </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <Link href="/" className="flex items-center gap-2.5 no-underline min-w-0">
+            <AsteriskMark size={18} color={tk.clay} />
             <span
+              className="truncate text-[15px] sm:text-base"
               style={{
-                fontFamily: tk.sans,
-                fontSize: "12px",
-                backgroundColor: tk.surfaceSecondary,
-                color: tk.onSurfaceTertiary,
-                border: `1px solid ${tk.borderTertiary}`,
-                borderRadius: "6px",
-                padding: "4px 10px",
+                fontFamily: tk.serif,
+                fontWeight: 500,
+                color: tk.onSurface,
+                letterSpacing: "-0.01em",
               }}
             >
-              ATS-ready
+              Resume Formatter
             </span>
-            <span
+          </Link>
+          <nav style={{ marginLeft: "auto", display: "flex", gap: "4px" }}>
+            <Link
+              href="/"
               style={{
                 fontFamily: tk.sans,
-                fontSize: "12px",
-                backgroundColor: tk.surfaceSecondary,
-                color: tk.onSurfaceTertiary,
-                border: `1px solid ${tk.borderTertiary}`,
+                fontSize: "13px",
+                fontWeight: 500,
+                color: tk.clayInteractive,
+                backgroundColor: "color-mix(in srgb, #c96442 10%, white)",
+                textDecoration: "none",
+                padding: "6px 12px",
                 borderRadius: "6px",
-                padding: "4px 10px",
               }}
             >
-              Instant
-            </span>
-          </div>
+              Format
+            </Link>
+            <Link
+              href="/builder"
+              style={{
+                fontFamily: tk.sans,
+                fontSize: "13px",
+                fontWeight: 500,
+                color: tk.onSurfaceTertiary,
+                textDecoration: "none",
+                padding: "6px 12px",
+                borderRadius: "6px",
+              }}
+            >
+              Build
+            </Link>
+          </nav>
         </div>
       </header>
 
@@ -499,6 +507,20 @@ export default function Home() {
 
             {/* Headline */}
             <div style={{ textAlign: "center", marginBottom: "40px" }}>
+              <span
+                style={{
+                  fontFamily: tk.sans,
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  letterSpacing: "0.14em",
+                  color: tk.clay,
+                  textTransform: "uppercase",
+                  display: "inline-block",
+                  marginBottom: "14px",
+                }}
+              >
+                Format Existing Resume
+              </span>
               <h1
                 style={{
                   fontFamily: tk.serif,
@@ -506,7 +528,7 @@ export default function Home() {
                   fontWeight: 500,
                   color: tk.onSurface,
                   lineHeight: 1.1,
-                  letterSpacing: "-0.01em",
+                  letterSpacing: "-0.015em",
                   marginBottom: "16px",
                 }}
               >
@@ -530,12 +552,12 @@ export default function Home() {
 
             {/* ─────── Upload Card ─────── */}
             <div
+              className="p-4 sm:p-6"
               style={{
                 backgroundColor: "#ffffff",
                 border: `1px solid ${tk.borderTertiary}`,
                 borderRadius: "16px",
-                padding: "24px",
-                boxShadow: "rgba(0,0,0,0.06) 0px 4px 20px",
+                boxShadow: "rgba(20, 20, 19, 0.04) 0px 2px 6px, rgba(20, 20, 19, 0.02) 0px 8px 24px",
                 display: "flex",
                 flexDirection: "column",
                 gap: "18px",
@@ -737,16 +759,18 @@ export default function Home() {
                   disabled={!canSubmit}
                   style={{
                     width: "100%",
-                    padding: "12px 18px",
-                    borderRadius: "8px",
+                    padding: "13px 18px",
+                    borderRadius: "10px",
                     backgroundColor: canSubmit ? tk.clayInteractive : tk.surfaceSecondary,
                     color: canSubmit ? "#faf9f5" : tk.onSurfaceGhost,
                     border: `1px solid ${canSubmit ? tk.clayInteractive : tk.borderTertiary}`,
                     fontFamily: tk.sans,
                     fontSize: "15px",
                     fontWeight: 500,
+                    letterSpacing: "0.005em",
                     cursor: canSubmit ? "pointer" : "not-allowed",
-                    transition: "border-width 0.15s ease, box-shadow 0.15s ease",
+                    transition: "transform 0.12s ease, box-shadow 0.15s ease",
+                    boxShadow: canSubmit ? "0 1px 2px color-mix(in srgb, #c96442 25%, transparent)" : "none",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -754,14 +778,12 @@ export default function Home() {
                   }}
                   onMouseEnter={(e) => {
                     if (!canSubmit) return;
-                    const el = e.currentTarget;
-                    el.style.borderWidth = "2px";
-                    el.style.boxShadow = "0 3px 12px color-mix(in srgb, #c96442 28%, transparent)";
+                    e.currentTarget.style.boxShadow = "0 4px 14px color-mix(in srgb, #c96442 32%, transparent)";
+                    e.currentTarget.style.transform = "translateY(-1px)";
                   }}
                   onMouseLeave={(e) => {
-                    const el = e.currentTarget;
-                    el.style.borderWidth = "1px";
-                    el.style.boxShadow = "none";
+                    e.currentTarget.style.boxShadow = canSubmit ? "0 1px 2px color-mix(in srgb, #c96442 25%, transparent)" : "none";
+                    e.currentTarget.style.transform = "translateY(0)";
                   }}
                 >
                   Format Resume
@@ -808,13 +830,12 @@ export default function Home() {
             {/* ─── Result Card ─── */}
             {stage === "done" && result && (
               <div
-                className="animate-in fade-in slide-in-from-bottom-4 duration-300"
+                className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-4 sm:p-6"
                 style={{
                   marginTop: "16px",
                   backgroundColor: tk.surfaceSecondary,
                   border: `1px solid ${tk.borderTertiary}`,
                   borderRadius: "16px",
-                  padding: "24px",
                   display: "flex",
                   flexDirection: "column",
                   gap: "18px",
@@ -863,39 +884,71 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Download — single full-width DOCX action */}
-                <button
-                  onClick={downloadDocx}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "8px",
-                    padding: "12px",
-                    borderRadius: "8px",
-                    backgroundColor: tk.clayInteractive,
-                    color: "#faf9f5",
-                    border: `1px solid ${tk.clayInteractive}`,
-                    fontFamily: tk.sans,
-                    fontSize: "15px",
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    transition: "border-width 0.15s ease, box-shadow 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderWidth = "2px";
-                    e.currentTarget.style.boxShadow =
-                      "0 2px 8px color-mix(in srgb, #c96442 30%, transparent)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderWidth = "1px";
-                    e.currentTarget.style.boxShadow = "none";
-                  }}
-                >
-                  <IconDownload size={15} />
-                  Download DOCX
-                </button>
+                {/* Download buttons */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  {/* DOCX – outlined */}
+                  <button
+                    onClick={() => downloadFile("docx")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "7px",
+                      padding: "12px",
+                      borderRadius: "10px",
+                      backgroundColor: "#ffffff",
+                      color: tk.clayInteractive,
+                      border: `1px solid ${tk.clayInteractive}`,
+                      fontFamily: tk.sans,
+                      fontSize: "14px",
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      transition: "background-color 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor =
+                        "color-mix(in srgb, #c96442 8%, white)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "#ffffff";
+                    }}
+                  >
+                    <IconDownload size={14} />
+                    Download DOCX
+                  </button>
+
+                  {/* PDF – filled clay */}
+                  <button
+                    onClick={() => downloadFile("pdf")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "7px",
+                      padding: "12px",
+                      borderRadius: "10px",
+                      backgroundColor: tk.clayInteractive,
+                      color: "#faf9f5",
+                      border: `1px solid ${tk.clayInteractive}`,
+                      fontFamily: tk.sans,
+                      fontSize: "14px",
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      transition: "transform 0.12s ease, box-shadow 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = "0 4px 14px color-mix(in srgb, #c96442 32%, transparent)";
+                      e.currentTarget.style.transform = "translateY(-1px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.boxShadow = "none";
+                      e.currentTarget.style.transform = "translateY(0)";
+                    }}
+                  >
+                    <IconDownload size={14} />
+                    Download PDF
+                  </button>
+                </div>
 
                 <button
                   onClick={reset}

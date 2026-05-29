@@ -303,3 +303,58 @@
 @utility animate-sparkle-twinkle {
   animation: sparkle-twinkle 1.8s ease-in-out infinite;
 }
+
+/* ─── "Generating" letter-wave loader (clay accent) ─── */
+.loader-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 22px 16px 44px;
+  position: relative;
+}
+
+.loader-letter {
+  font-family: var(--font-lora, Georgia, serif);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--color-clay-interactive, #c96442);
+  display: inline-block;
+  opacity: 0.4;
+  transform: translateY(0);
+  animation: loader-letter-wave 1.8s ease-in-out infinite;
+}
+
+.loader-letter:nth-child(1)  { animation-delay: 0.00s; }
+.loader-letter:nth-child(2)  { animation-delay: 0.09s; }
+.loader-letter:nth-child(3)  { animation-delay: 0.18s; }
+.loader-letter:nth-child(4)  { animation-delay: 0.27s; }
+.loader-letter:nth-child(5)  { animation-delay: 0.36s; }
+.loader-letter:nth-child(6)  { animation-delay: 0.45s; }
+.loader-letter:nth-child(7)  { animation-delay: 0.54s; }
+.loader-letter:nth-child(8)  { animation-delay: 0.63s; }
+.loader-letter:nth-child(9)  { animation-delay: 0.72s; }
+.loader-letter:nth-child(10) { animation-delay: 0.81s; }
+
+.loader {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  border: 2px solid color-mix(in srgb, var(--color-clay-interactive, #c96442) 22%, transparent);
+  border-top-color: var(--color-clay-interactive, #c96442);
+  border-radius: 50%;
+  animation: loader-spin 0.85s linear infinite;
+}
+
+@keyframes loader-letter-wave {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50%      { opacity: 1;   transform: translateY(-3px); }
+}
+
+@keyframes loader-spin {
+  from { transform: translateX(-50%) rotate(0deg); }
+  to   { transform: translateX(-50%) rotate(360deg); }
+}
