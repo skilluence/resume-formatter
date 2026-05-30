@@ -3,7 +3,10 @@ services:
     name: resume-formatter-api
     runtime: docker
     dockerfilePath: ./Dockerfile
+    healthCheckPath: /
     envVars:
       - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
         sync: false
     autoDeploy: true

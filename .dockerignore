@@ -1,0 +1,28 @@
+# Keep the Docker build context small & reproducible.
+# Frontend is deployed separately on Vercel — never ship it in the API image.
+frontend/
+
+# Local secrets & env
+.env
+.env.*
+*.env
+
+# Python caches / virtualenvs
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Ephemeral user files (regenerated at runtime)
+uploads/
+outputs/
+
+# VCS / tooling / OS junk
+.git/
+.gitignore
+.playwright-mcp/
+.DS_Store
+Thumbs.db
+demoResume
