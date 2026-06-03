@@ -128,4 +128,8 @@ def structure_resume(raw_text: str) -> dict:
         temperature=0,
         response_format={"type": "json_object"},
     )
-    return json.loads(response.choices[0].message.content)
+    structured = json.loads(response.choices[0].message.content)
+
+    # Enforce fidelity: drop anything the model added that isn't in the source.
+    from ai.verifier import verify_against_source
+    return verify_against_source(structured, raw_text)

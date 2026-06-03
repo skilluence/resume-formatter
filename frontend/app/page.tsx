@@ -249,7 +249,7 @@ function ThinkingIndicator({ progress }: { progress: number }) {
             style={{
               fontFamily: tk.sans,
               fontSize: "20px",
-              fontWeight: 600,
+              fontWeight: 500,
               letterSpacing: "-0.01em",
             }}
           >
@@ -297,7 +297,7 @@ function ThinkingIndicator({ progress }: { progress: number }) {
             style={{
               fontFamily: tk.sans,
               fontSize: "13px",
-              fontWeight: 600,
+              fontWeight: 500,
               color: tk.clayInteractive,
               fontVariantNumeric: "tabular-nums",
             }}
@@ -325,12 +325,23 @@ export default function Home() {
   const [textareaFocused, setTextareaFocused] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Clear a finished/failed result so changing the input starts a fresh run.
+  const clearResult = useCallback(() => {
+    setStage("idle");
+    setResult(null);
+    setError("");
+    setProgress(0);
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const dropped = e.dataTransfer.files[0];
-    if (dropped) setFile(dropped);
-  }, []);
+    if (dropped) {
+      setFile(dropped);
+      clearResult();
+    }
+  }, [clearResult]);
 
   const handleFormat = async () => {
     if (!file && !plainText.trim()) return;
@@ -377,6 +388,7 @@ export default function Home() {
 
   const clearFile = () => {
     setFile(null);
+    clearResult();
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -403,7 +415,7 @@ export default function Home() {
       dragging ? "#d97757" : file ? "#7aab7e" : tk.borderSecondary
     }`,
     borderRadius: "10px",
-    padding: "40px 20px",
+    padding: "56px 24px",
     textAlign: "center",
     cursor: "pointer",
     transition: "all 0.2s ease",
@@ -473,20 +485,6 @@ export default function Home() {
             >
               Format
             </Link>
-            <Link
-              href="/builder"
-              style={{
-                fontFamily: tk.sans,
-                fontSize: "13px",
-                fontWeight: 500,
-                color: tk.onSurfaceTertiary,
-                textDecoration: "none",
-                padding: "6px 12px",
-                borderRadius: "6px",
-              }}
-            >
-              Build
-            </Link>
           </nav>
         </div>
       </header>
@@ -503,7 +501,7 @@ export default function Home() {
             alignItems: "center",
           }}
         >
-          <div style={{ width: "100%", maxWidth: "640px" }}>
+          <div style={{ width: "100%", maxWidth: "720px" }}>
 
             {/* Headline */}
             <div style={{ textAlign: "center", marginBottom: "40px" }}>
@@ -552,7 +550,7 @@ export default function Home() {
 
             {/* ─────── Upload Card ─────── */}
             <div
-              className="p-4 sm:p-6"
+              className="p-6 sm:p-8"
               style={{
                 backgroundColor: "#ffffff",
                 border: `1px solid ${tk.borderTertiary}`,
@@ -560,7 +558,7 @@ export default function Home() {
                 boxShadow: "rgba(20, 20, 19, 0.04) 0px 2px 6px, rgba(20, 20, 19, 0.02) 0px 8px 24px",
                 display: "flex",
                 flexDirection: "column",
-                gap: "18px",
+                gap: "22px",
               }}
             >
               {/* Mode toggle chips */}
@@ -624,7 +622,10 @@ export default function Home() {
                     type="file"
                     accept=".pdf,.docx,.doc"
                     style={{ display: "none" }}
-                    onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) { setFile(f); clearResult(); }
+                    }}
                   />
 
                   {file ? (
@@ -726,7 +727,7 @@ export default function Home() {
                   rows={9}
                   placeholder="Paste your resume text here…"
                   value={plainText}
-                  onChange={(e) => setPlainText(e.target.value)}
+                  onChange={(e) => { setPlainText(e.target.value); clearResult(); }}
                   onFocus={() => setTextareaFocused(true)}
                   onBlur={() => setTextareaFocused(false)}
                   style={{
@@ -830,7 +831,7 @@ export default function Home() {
             {/* ─── Result Card ─── */}
             {stage === "done" && result && (
               <div
-                className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-4 sm:p-6"
+                className="animate-in fade-in slide-in-from-bottom-4 duration-300 p-6 sm:p-8"
                 style={{
                   marginTop: "16px",
                   backgroundColor: tk.surfaceSecondary,
