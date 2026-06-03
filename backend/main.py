@@ -1,6 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Any, Dict
 from dotenv import load_dotenv
 import os
 import uuid
@@ -46,8 +48,11 @@ def root():
 async def format_resume(
     file: UploadFile = File(None),
     plain_text: str = Form(None),
-    format_type: str = Form("compact"),
 ):
+    """Parse an uploaded resume into structured JSON for the review screen.
+
+    No document is written here — the user reviews/edits/approves first, then
+    calls /build to generate the final DOCX from exactly what they approved."""
     if not file and not plain_text:
         raise HTTPException(status_code=400, detail="Provide a file or plain text.")
 
@@ -72,24 +77,40 @@ async def format_resume(
     else:
         raw_text = plain_text
 
-    from ai.structurer import structure_resume
-    structured = structure_resume(raw_text)
+    from structurer import structure_resume
+    resume = structure_resume(raw_text)
 
-    candidate_name = structured.get("name", "Unknown")
-    job_id, output_path = _versioned_path(candidate_name, format_type)
+    return JSONResponse({
+        "candidate_name": resume.get("name") or "Unknown",
+        "resume": resume,
+    })
+
+
+class BuildRequest(BaseModel):
+    resume: Dict[str, Any]
+
+
+@app.post("/build")
+def build_resume(req: BuildRequest):
+    """Render the user-approved/edited resume JSON into a downloadable DOCX.
+
+    The frontend has already applied the review choices (skipped sections
+    removed, GPA hidden if unwanted), so we render exactly what we're given."""
+    resume = req.resume
+    if not isinstance(resume, dict) or not (resume.get("name") or "").strip():
+        raise HTTPException(status_code=400, detail="A resume with at least a name is required.")
+
+    candidate_name = resume.get("name", "Resume")
+    job_id, output_path = _versioned_path(candidate_name, "compact")
 
     from formatters.compact_ats import format_compact
-    from formatters.readable import format_readable
-
-    if format_type == "compact":
-        format_compact(structured, output_path)
-    else:
-        format_readable(structured, output_path)
+    format_compact(resume, output_path)
 
     return JSONResponse({
         "job_id": job_id,
         "candidate_name": candidate_name,
         "docx_url": f"/download/{job_id}/docx",
+        "pdf_url": f"/download/{job_id}/pdf",
     })
 
 

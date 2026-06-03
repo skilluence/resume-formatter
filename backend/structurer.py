@@ -29,8 +29,10 @@ import re
 logger = logging.getLogger("resume.structurer")
 
 # --- bullets -----------------------------------------------------------------
-_BULLET_GLYPHS = ("•", "·", "‣", "◦", "▪", "●", "∙", "")
-_BULLET_RE = re.compile(r"^\s*([•·‣◦▪●∙*]|[-–—])\s+")
+# Includes the Private-Use-Area range (U+E000–U+F8FF) — Word/PDF exports of
+# Symbol/Wingdings bullets land there (e.g. U+F0B7 "•", U+F0A7 "▪"). Those carry
+# no text meaning, so a leading one is always a bullet marker.
+_BULLET_RE = re.compile(r"^\s*([•·‣◦▪●∙○■◆➢➤»*]|[-]|[–—-])\s+")
 
 # --- dates -------------------------------------------------------------------
 _MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -80,6 +82,20 @@ _SECTION_SYNONYMS = {
 # Flatten to phrase -> type for O(1) exact lookup.
 _HEADING_LOOKUP = {phrase: typ for typ, phrases in _SECTION_SYNONYMS.items() for phrase in phrases}
 
+# Fallback for ALL-CAPS headings not in the synonym list (e.g. "PROJECT
+# MANAGEMENT SKILLS", "WORK EXPERIENCE"). Order matters: a heading containing
+# "skill" is a skills section even if it also says "project". Only consulted for
+# lines that already look like a heading (ALL CAPS, short) so job titles such as
+# "Project Manager" can never trip it.
+_HEADING_KEYWORDS = [
+    (re.compile(r"skill|competenc|proficienc|expertise|technolog|toolset", re.I), "skills"),
+    (re.compile(r"experience|employment|work history", re.I), "experience"),
+    (re.compile(r"education|academic|qualification", re.I), "education"),
+    (re.compile(r"project", re.I), "projects"),
+    (re.compile(r"certificat|licen[sc]e|courses", re.I), "certifications"),
+    (re.compile(r"summary|profile|objective|about|overview", re.I), "summary"),
+]
+
 _EMBEDDED_MARKER = "embedded links:"
 
 
@@ -97,13 +113,24 @@ def _starts_lower(line: str) -> bool:
     """A wrapped continuation line (from a PDF) usually breaks mid-sentence, so
     it starts with a lowercase letter — unlike a heading or a title."""
     s = line.lstrip()
-    return bool(s) and s[0].islower()
+    return bool(s) and (s[0].islower() or s[0].isdigit())
 
 
 def _heading_type(line: str):
-    """Return the canonical section type for a known heading line, else None."""
+    """Return the canonical section type for a heading line, else None.
+
+    Tries the exact synonym list first, then an ALL-CAPS keyword fallback so a
+    bespoke heading like "PROJECT MANAGEMENT SKILLS" still routes to skills. The
+    fallback is gated on ``_looks_like_heading`` so a job title such as
+    "Project Manager" (Title Case) can never be mistaken for a section."""
     norm = re.sub(r"\s+", " ", line.strip().rstrip(":").lower())
-    return _HEADING_LOOKUP.get(norm)
+    if norm in _HEADING_LOOKUP:
+        return _HEADING_LOOKUP[norm]
+    if _looks_like_heading(line):
+        for rx, typ in _HEADING_KEYWORDS:
+            if rx.search(norm):
+                return typ
+    return None
 
 
 def _looks_like_heading(line: str) -> bool:
@@ -173,12 +200,9 @@ def _parse_contact(contact_line: str, embedded: list) -> dict:
         elif low.startswith(("http://", "https://", "www.")):
             domain = re.sub(r"^https?://(www\.)?", "", low).split("/")[0]
             contact["links"].append({"label": domain or url, "url": url})
-    # If linkedin/github were only the bare word with no real URL, drop them —
-    # a label with no target carries no resume data.
-    for k in ("linkedin", "github"):
-        v = contact[k]
-        if v and "." not in v and "/" not in v:
-            contact[k] = None
+    # Keep a bare "LinkedIn"/"GitHub" label even with no recovered URL — the
+    # person listed it, so we never drop it; the review screen lets them add the
+    # link. (When a real URL was embedded, the loop above already replaced it.)
     return contact
 
 
@@ -206,120 +230,189 @@ def _parse_skills(body: list) -> dict:
 
 
 def _iter_entries(body: list, is_header):
-    """Group a section body into (header_line, bullet_lines) entries.
+    """Group a section body into entries: ``{"header": [lines], "bullets": [..]}``.
 
-    A line is a header when ``is_header(line)`` is true. Bullets and wrapped
-    continuations (a non-bullet line that starts lowercase) attach to the
-    current entry so nothing is split apart or lost."""
+    Bullet detection is glyph-independent. If the section uses bullet glyphs,
+    only glyph lines start bullets. If it doesn't (some PDFs drop the glyph),
+    a capitalised line starts a new bullet and a lowercase line is a wrapped
+    continuation. A non-glyph capitalised line *before any bullet* is kept as a
+    second header line — e.g. a job title that sits on its own line. Nothing is
+    split apart or lost."""
+    has_glyphs = any(_is_bullet(l) for l in body)
     entries = []
-    cur_header, cur_bullets = None, []
+    cur = None
     for line in body:
-        if _is_bullet(line):
-            cur_bullets.append(_strip_bullet(line))
-        elif is_header(line) and not _starts_lower(line):
-            if cur_header is not None or cur_bullets:
-                entries.append((cur_header, cur_bullets))
-            cur_header, cur_bullets = line, []
-        else:
-            # continuation of the last bullet, or a stray line under the header
-            if cur_bullets:
-                cur_bullets[-1] = (cur_bullets[-1] + " " + line).strip()
-            elif cur_header is not None:
-                cur_header = (cur_header + " " + line).strip()
+        bullet = _is_bullet(line)
+        # A glyph bullet is ALWAYS a bullet — never a header — even when it
+        # contains an inline date range (e.g. "• …(– phase). | 2020 – 2021").
+        if not bullet and is_header(line) and not _starts_lower(line):
+            cur = {"header": [line], "bullets": []}
+            entries.append(cur)
+        elif bullet:
+            if cur is None:
+                cur = {"header": [], "bullets": []}
+                entries.append(cur)
+            cur["bullets"].append(_strip_bullet(line))
+        elif cur is None:
+            cur = {"header": [line], "bullets": []}
+            entries.append(cur)
+        elif _starts_lower(line):
+            if cur["bullets"]:
+                cur["bullets"][-1] = (cur["bullets"][-1] + " " + line).strip()
+            elif cur["header"]:
+                cur["header"][-1] = (cur["header"][-1] + " " + line).strip()
             else:
-                cur_header, cur_bullets = line, []
-    if cur_header is not None or cur_bullets:
-        entries.append((cur_header, cur_bullets))
+                cur["header"].append(line)
+        elif not has_glyphs:
+            cur["bullets"].append(line)            # no-glyph section: a new bullet
+        elif not cur["bullets"] and len(line.split()) <= 6:
+            cur["header"].append(line)             # a SHORT line alone = a title
+        else:
+            cur["bullets"].append(line)            # a (glyph-less) bullet sentence
     return entries
 
 
-def _parse_job_header(line: str) -> dict:
-    """Parse one experience header across both templates (tab => Word style,
-    pipes => PDF style)."""
+_COUNTRIES = {
+    "usa", "us", "india", "ind", "uk", "uae", "canada", "germany", "australia",
+    "singapore", "sg", "ireland", "netherlands", "france", "spain", "remote",
+}
+
+
+def _looks_like_location(s: str) -> bool:
+    """True for a place segment ("San Jose, CA", "Ahmedabad, India", "USA",
+    "Remote") — conservative, so a company name with a comma ("Acme, Inc.")
+    isn't mistaken for a location."""
+    s = s.strip()
+    if not s:
+        return False
+    if re.search(r",\s*[A-Z]{2}$", s):                  # "City, ST"
+        return True
+    last = s.split(",")[-1].strip().lower().strip(".")
+    if last in _COUNTRIES:                               # "City, India" / "USA"
+        return True
+    if "remote" in s.lower() and len(s.split()) <= 3:    # "Remote", "Remote Ready"
+        return True
+    return False
+
+
+def _parse_single_job_line(line: str) -> dict:
+    """Parse one experience-header line across every layout — pipes, tabs,
+    slashes, dashes — pulling the location out wherever it sits. General, not
+    tuned to any one template."""
     job = {"title": "", "company": "", "location": None, "start_date": "", "end_date": ""}
 
-    if "\t" in line:  # Word style: "Company / Title — sub \t Dates | Location"
-        left, _, right = line.partition("\t")
-        start, end, right = _extract_date_range(right)
-        job["start_date"], job["end_date"] = start or "", end or ""
-        loc = right.lstrip("|").strip()
-        job["location"] = loc or None
-        if " / " in left:
-            company, _, title = left.partition(" / ")
+    start, end, line = _extract_date_range(line)
+    job["start_date"], job["end_date"] = start or "", end or ""
+
+    # Tabs and pipes are the strong field separators.
+    segs = [s.strip() for s in re.split(r"[\t|]", line) if s.strip()]
+
+    # Lift out a location segment so it can't pollute title/company.
+    loc_idx = next((i for i, s in enumerate(segs) if _looks_like_location(s)), None)
+    if loc_idx is not None and len(segs) > 1:
+        job["location"] = segs.pop(loc_idx)
+
+    if len(segs) >= 2:
+        job["title"], job["company"] = segs[0], segs[1]
+        if len(segs) > 2 and not job["location"]:
+            job["location"] = segs[-1]
+    elif len(segs) == 1:
+        seg = segs[0]
+        if " / " in seg:                                 # "Company / Title" (slash => company first)
+            company, _, title = seg.partition(" / ")
             job["company"], job["title"] = company.strip(), title.strip()
         else:
-            job["title"] = left.strip()
-        return job
-
-    if "|" in line:  # PDF style: "Title | Company Dates | Location"
-        segs = _split_pipes(line)
-        date_idx = next((i for i, s in enumerate(segs) if _DATE_RANGE_RE.search(s)), None)
-        if date_idx is not None:
-            start, end, company = _extract_date_range(segs[date_idx])
-            job["start_date"], job["end_date"] = start or "", end or ""
-            job["company"] = company
-            before = segs[:date_idx]
-            after = segs[date_idx + 1:]
-            if before:
-                job["title"] = before[0]
-                if len(before) > 1 and not job["company"]:
-                    job["company"] = before[1]
-            if after:
-                job["location"] = after[-1]
-        else:
-            job["title"] = segs[0] if segs else line
-            if len(segs) > 1:
-                job["company"] = segs[1]
-            if len(segs) > 2:
-                job["location"] = segs[-1]
-        return job
-
-    # No tab, no pipe: keep whatever's there as the title (lossless).
-    start, end, rest = _extract_date_range(line)
-    job["start_date"], job["end_date"] = start or "", end or ""
-    job["title"] = rest
+            dash = [p.strip() for p in re.split(r"\s+[–—]\s+", seg) if p.strip()]
+            if len(dash) >= 2:                           # "Title – Company [– Location]"
+                job["title"] = dash[0]
+                if not job["location"] and len(dash) > 2 and _looks_like_location(dash[-1]):
+                    job["location"] = dash[-1]
+                    job["company"] = " ".join(dash[1:-1]).strip()
+                else:
+                    job["company"] = " ".join(dash[1:]).strip()
+            else:
+                # Lone label: the title is usually on its own line (attached by
+                # _parse_job_header), so treat this as the company.
+                job["company"] = seg
     return job
+
+
+def _parse_job_header(header_lines: list) -> dict:
+    """Parse a (possibly multi-line) experience header. The line carrying the
+    dates is the anchor; any other header line is the title or company that the
+    template placed on its own line (e.g. "Company <tab> Dates" then "Title")."""
+    if not header_lines:
+        return _parse_single_job_line("")
+    date_line = next((l for l in header_lines if _DATE_RANGE_RE.search(l)), header_lines[0])
+    job = _parse_single_job_line(date_line)
+    extra = " ".join(l.strip() for l in header_lines if l != date_line and l.strip()).strip()
+    if extra:
+        if not job["title"]:
+            job["title"] = extra
+        elif not job["company"]:
+            job["company"] = extra
+        else:
+            job["title"] = (job["title"] + " " + extra).strip()
+    return job
+
+
+def _is_job_header(line: str) -> bool:
+    """A job header carries a date range AND is short once the date is removed
+    (a title/company/location line, ~a dozen words). A full-sentence bullet that
+    merely mentions a year range is long, so it is NOT treated as a header. This
+    is a general rule for every resume, not a per-file patch."""
+    if not _DATE_RANGE_RE.search(line):
+        return False
+    _, _, rest = _extract_date_range(line)
+    return len(rest.split()) <= 16
 
 
 def _parse_experience(body: list) -> list:
     jobs = []
-    for header, bullets in _iter_entries(body, lambda l: bool(_DATE_RANGE_RE.search(l))):
-        if header is None:
-            # bullets with no header — graft onto the previous job, else make a stub
-            if jobs:
-                jobs[-1]["bullets"].extend(bullets)
-                continue
-            header = ""
-        job = _parse_job_header(header)
-        job["bullets"] = bullets
+    for entry in _iter_entries(body, _is_job_header):
+        job = _parse_job_header(entry["header"])
+        job["bullets"] = entry["bullets"]
         jobs.append(job)
     return jobs
 
 
 def _parse_projects(body: list) -> list:
-    """Two shapes: PDF 'Name | tech_stack' on one line; Word 'Name' then a
-    separate tech-stack line. A lowercase continuation joins the last bullet."""
+    """Two shapes, handled in one pass: PDF 'Name | tech_stack' on one line;
+    Word 'Name' then a separate tech-stack line. Bullet detection is
+    glyph-independent (a project name in the PDF style always carries a '|', so
+    even glyph-less PDFs don't confuse a bullet for a name)."""
+    has_glyphs = any(_is_bullet(l) for l in body)
     projects = []
     cur = None
+
+    def new_proj(name="", tech=None):
+        nonlocal cur
+        cur = {"name": name, "tech_stack": tech, "bullets": []}
+        projects.append(cur)
+
     for line in body:
-        if _is_bullet(line):
-            if cur is None:
-                cur = {"name": "", "tech_stack": None, "bullets": []}
-                projects.append(cur)
-            cur["bullets"].append(_strip_bullet(line))
-            continue
-        if _starts_lower(line) and cur is not None and cur["bullets"]:
-            cur["bullets"][-1] = (cur["bullets"][-1] + " " + line).strip()
-            continue
-        if "|" in line and not _DATE_RANGE_RE.search(line):
+        if "|" in line and not _DATE_RANGE_RE.search(line):       # Name | tech_stack
             name, _, tech = line.partition("|")
-            cur = {"name": name.strip(), "tech_stack": tech.strip() or None, "bullets": []}
-            projects.append(cur)
+            new_proj(name.strip(), tech.strip() or None)
+        elif _is_bullet(line):
+            if cur is None:
+                new_proj()
+            cur["bullets"].append(_strip_bullet(line))
+        elif _starts_lower(line) and cur is not None:             # wrapped continuation
+            if cur["bullets"]:
+                cur["bullets"][-1] = (cur["bullets"][-1] + " " + line).strip()
+            elif cur["tech_stack"]:
+                cur["tech_stack"] = (cur["tech_stack"] + " " + line).strip()
+            else:
+                cur["name"] = (cur["name"] + " " + line).strip()
+        elif not has_glyphs:                                      # glyph-less PDF bullet
+            if cur is None:
+                new_proj()
+            cur["bullets"].append(line)
         elif cur is not None and not cur["bullets"] and cur["tech_stack"] is None:
-            cur["tech_stack"] = line.strip()  # Word style separate tech line
+            cur["tech_stack"] = line.strip()                      # Word style tech line
         else:
-            cur = {"name": line.strip(), "tech_stack": None, "bullets": []}
-            projects.append(cur)
+            new_proj(line.strip())                                # a new project name
     return projects
 
 
@@ -363,10 +456,14 @@ def _absorb_education_line(entry: dict, line: str) -> str:
         for seg in segs:
             if entry["gpa"] is None and _GPA_RE.search(seg):
                 entry["gpa"] = seg
+            elif re.match(r"^(relevant\s+)?(coursework|honou?rs|minor|thesis|activities|specialization|concentration)\b", seg, re.IGNORECASE):
+                entry["details"].append(seg)
             elif entry["location"] is None and re.search(r",\s*[A-Za-z .]+$", seg) and seg is not segs[0]:
                 entry["location"] = seg
             else:
                 institution_parts.append(seg)
+        if len(institution_parts) > 1:           # keep any extra segments as details
+            entry["details"].extend(institution_parts[1:])
         return institution_parts[0] if institution_parts else (segs[0] if segs else "")
     # No pipes (Word style). Try to peel a trailing 'City, ST' as location.
     m = re.search(r",\s*([A-Za-z .]+,\s*[A-Z]{2}|[A-Za-z .]+,\s*[A-Za-z ]+)$", line)
@@ -436,7 +533,9 @@ def _all_strings(value):
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for v in value.values():
+        for k, v in value.items():
+            if isinstance(k, str):
+                yield k                      # skills category labels live in the keys
             yield from _all_strings(v)
     elif isinstance(value, list):
         for v in value:

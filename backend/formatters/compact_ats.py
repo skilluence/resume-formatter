@@ -4,6 +4,14 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import copy
+import re
+
+# The "List Bullet" style already draws a marker, so strip any leading bullet
+# glyph the source carried (incl. Symbol/Wingdings PUA bullets like U+F0B7) to
+# avoid double bullets — defence in depth on top of the structurer's stripping.
+_LEADING_BULLET_RE = re.compile(
+    r"^\s*[•·‣◦▪●∙○■◆➢➤»-]+\s*"
+)
 
 
 FONT_NAME = "Calibri"
@@ -213,6 +221,7 @@ def _add_job_header(doc, title: str, company: str, location: str, start: str, en
 
 
 def _add_bullet(doc, text: str):
+    text = _LEADING_BULLET_RE.sub("", text, count=1)
     p = doc.add_paragraph(style="List Bullet")
     _set_spacing(p, before=0, after=1)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -432,11 +441,26 @@ def format_compact(data: dict, output_path: str):
                 run_date.font.name = FONT_NAME
                 run_date.font.size = BODY_SIZE
 
+            inst_text = edu.get("institution", "")
+            if edu.get("location"):
+                inst_text = f"{inst_text}  |  {edu['location']}" if inst_text else edu["location"]
             p2 = doc.add_paragraph()
             _set_spacing(p2, before=0, after=1)
-            run_inst = p2.add_run(edu.get("institution", ""))
+            run_inst = p2.add_run(inst_text)
             run_inst.font.name = FONT_NAME
             run_inst.font.size = BODY_SIZE
+
+            # GPA on its own line (kept separate so the UI can hide it on request).
+            if edu.get("gpa"):
+                pg = doc.add_paragraph()
+                _set_spacing(pg, before=0, after=1)
+                run_gpa = pg.add_run(edu["gpa"])
+                run_gpa.font.name = FONT_NAME
+                run_gpa.font.size = BODY_SIZE
+
+            # Coursework / honours / any other extra academic lines.
+            for detail in edu.get("details") or []:
+                _add_bullet(doc, detail)
 
     doc.save(output_path)
     print(f"Saved: {output_path}")

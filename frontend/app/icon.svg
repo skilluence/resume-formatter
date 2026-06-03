@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#faf9f5"/>
+
+  <!-- curled spiral tail -->
+  <path d="M46 38 C55 37 59 45 54.5 51 C50.5 56 43.5 53 45 47 C45.8 43.4 50.6 44.2 49.6 48"
+        fill="none" stroke="#d97757" stroke-width="4.3" stroke-linecap="round"/>
+
+  <!-- two gripping feet -->
+  <path d="M25 40 l-1.5 9 3.5 0 0 -3.5 M33 40 l1.5 9 -3.5 0 0 -3.5"
+        fill="none" stroke="#c96442" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- body + head + casque (light orange) -->
+  <path d="M8 32
+           C8 26.5 12 23 17.5 22
+           L21 15.5 L24.5 22
+           C33 20.5 43 21 48 25
+           C53.5 29 53.5 37 47 40
+           C39 43.5 16 43.5 11 39
+           C8.5 37 7.6 34.6 8 32 Z" fill="#d97757"/>
+  <!-- snout -->
+  <path d="M8 32 C4.5 30.5 2.5 33 3.8 36 C6 37.2 8.2 36 9 34 Z" fill="#d97757"/>
+
+  <!-- darker crest stripes down the body -->
+  <g stroke="#c96442" stroke-width="2.3" stroke-linecap="round">
+    <line x1="30" y1="22.5" x2="29" y2="29.5"/>
+    <line x1="35" y1="22.5" x2="34.3" y2="30.5"/>
+    <line x1="40" y1="23.5" x2="40" y2="31"/>
+    <line x1="44.5" y1="25.5" x2="45.5" y2="31.5"/>
+  </g>
+
+  <!-- big eye -->
+  <circle cx="15" cy="32" r="5" fill="#f3b187"/>
+  <circle cx="13.4" cy="32" r="2.2" fill="#2b1c14"/>
+</svg>
