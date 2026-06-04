@@ -1,154 +1,214 @@
+<div align="center">
+
 # Resume Formatter
 
-Transform unformatted resumes into ATS-ready, recruiter-friendly documents using AI.
+### Turn any messy resume into a clean, ATS-ready document **without losing a single word.**
 
-Upload a PDF or DOCX → AI structures it → Download a beautifully formatted DOCX + PDF.
+Upload a PDF or DOCX → review every section live → download a polished **DOCX** or **PDF**.
+
+<br/>
+
+![No AI](https://img.shields.io/badge/100%25_Rule--Based-No_AI-38bdf8?style=for-the-badge)
+![Lossless](https://img.shields.io/badge/Lossless-Never_adds,_never_drops-0ea5e9?style=for-the-badge)
+![ATS Ready](https://img.shields.io/badge/ATS-Optimized-7dd3fc?style=for-the-badge)
+
+<br/>
+
+![Next.js](https://img.shields.io/badge/Next.js_14-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind_v4-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Python](https://img.shields.io/badge/Python_3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
+![Render](https://img.shields.io/badge/Render-Docker-46E3B7?style=flat-square&logo=render&logoColor=white)
+
+</div>
 
 ---
 
-## What It Does
+## ✨ What It Does
 
-- Parses PDF and DOCX resumes
-- Uses OpenAI GPT-4o-mini to extract structured data (name, contact, summary, skills, experience, projects, education, certifications)
-- Generates a compact ATS-optimized DOCX with Calibri font, cobalt blue headers, tight margins
-- Exports as both DOCX and PDF
-- Clean Next.js frontend with drag & drop upload
+> [!NOTE]
+> **No AI. No API keys. No hallucinations.** Earlier versions used GPT-4o-mini to structure resumes — but an LLM can silently *invent* a certification or a date. This version is **fully rule-based and deterministic**, so the output can only ever contain words that were in your original file.
+
+- 📥 **Parses** PDF and DOCX resumes (and pasted plain text)
+- 🧠 **Structures** them with deterministic rules — name, contact, summary, skills, experience, projects, education, certifications, and *any* unrecognised section
+- 🖊️ **Review screen** — keep / skip / edit each section with a **live, paginated A4 preview** that matches the download exactly
+- 🎨 **Generates** a compact, ATS-friendly DOCX — Calibri, tight 0.2″ margins, cobalt-blue section headers
+- 📤 **Exports** as **DOCX** or **PDF**
+- 🔒 **Lossless guarantee** — every line of the source lands somewhere in the output; nothing is ever fabricated or dropped
 
 ---
 
-## Tech Stack
+## How It Works
+
+```
+ Upload / Paste          Parse              Structure (rules)         Review & Edit            Build
+ ┌────────────┐    ┌────────────────┐    ┌───────────────────┐    ┌─────────────────┐    ┌──────────────┐
+ │ PDF · DOCX │ →  │ pdfplumber /   │ →  │ structurer.py     │ →  │ keep / skip /   │ →  │ DOCX  ·  PDF │
+ │ · text     │    │ python-docx    │    │ (deterministic)   │    │ edit + preview  │    │  download    │
+ └────────────┘    └────────────────┘    └───────────────────┘    └─────────────────┘    └──────────────┘
+       POST /format  ───────────────────────────────────►            POST /build  ──────►  GET /download
+```
+
+1. **`POST /format`** parses the upload and returns structured **JSON** — no document is written yet.
+2. You **review and edit** each section in the two-pane UI (fixed left rail · scrollable live document on the right).
+3. **`POST /build`** renders *exactly* what you approved into a DOCX and returns download links.
+
+---
+
+## 🧰 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS |
-| Backend | FastAPI, Python 3.10+ |
-| AI | OpenAI GPT-4o-mini |
-| PDF Parsing | pdfplumber |
-| DOCX Parsing | python-docx |
-| DOCX Generation | python-docx |
-| PDF Export | docx2pdf (Windows) / LibreOffice (Linux) |
+| 🖥️ Frontend | Next.js 14 (App Router), TypeScript, Tailwind v4 — deployed on **Vercel** |
+| ⚙️ Backend | FastAPI, Python 3.10+ — deployed on **Render** (Docker) |
+| 🧠 Structuring | Pure Python rules (standard library) — **no AI, no network** |
+| 📄 PDF parsing | `pdfplumber` |
+| 📝 DOCX parsing & generation | `python-docx` |
+| 🔄 PDF export | LibreOffice (`soffice`) on Linux/Docker · `docx2pdf` + MS Word on Windows |
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 resumeFormat/
 ├── backend/
-│   ├── main.py                  # FastAPI app, routes
+│   ├── main.py                 # FastAPI app: /format, /build, /download/{id}/{docx,pdf}
+│   ├── structurer.py           # 🧠 Rule-based resume → structured JSON (no AI)
 │   ├── parsers/
-│   │   ├── pdf_parser.py        # Extract text from PDF
-│   │   └── docx_parser.py       # Extract text from DOCX
-│   ├── ai/
-│   │   └── structurer.py        # OpenAI → structured JSON
-│   └── formatters/
-│       ├── compact_ats.py       # Compact ATS DOCX formatter
-│       └── readable.py          # Readable format (uses compact)
+│   │   ├── pdf_parser.py        # Extract text from PDF (pdfplumber)
+│   │   └── docx_parser.py       # Extract text from DOCX (python-docx)
+│   ├── formatters/
+│   │   └── compact_ats.py       # Build the styled ATS DOCX
+│   ├── tests/                   # pytest suite (32 tests)
+│   └── requirements.txt
 ├── frontend/
 │   ├── app/
-│   │   ├── layout.tsx
-│   │   ├── page.tsx             # Main UI
+│   │   ├── page.tsx             # "/"        landing page
+│   │   ├── format/page.tsx      # "/format"  the workspace
 │   │   └── globals.css
-│   ├── package.json
-│   └── next.config.js
-├── requirements.txt
-├── .env                         # Not committed — create manually
-└── README.md
+│   ├── components/
+│   │   ├── Workspace.tsx        # Two-pane shell: upload → review
+│   │   ├── ResumePreview.tsx    # Live paginated A4 document
+│   │   ├── SectionCard.tsx      # Per-section keep / skip / edit
+│   │   └── Landing.tsx
+│   └── lib/                     # resume types, design tokens, helpers
+├── Dockerfile                  # Backend image (installs LibreOffice for PDF)
+├── render.yaml                 # Render deploy (Docker runtime)
+└── vercel.json                 # Frontend deploy
 ```
 
 ---
 
-## Local Setup
+## 🚀 Local Setup
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- OpenAI API key
-- Microsoft Word (Windows) or LibreOffice (Linux/Mac) — for PDF export
+- 🐍 Python **3.10+**
+- 🟢 Node.js **18+**
+- 📄 *(PDF export only)* LibreOffice (Linux/Mac) **or** MS Word (Windows)
 
----
+> [!TIP]
+> **No OpenAI key is required.** The backend has no AI dependency.
 
-### 1. Clone the repo
+### 1 — Backend
 
-```bash
-git clone https://github.com/YOUR_USERNAME/resume-formatter.git
-cd resume-formatter
-```
-
----
-
-### 2. Backend setup
-
-**Install Python dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-**Create `.env` file in the root:**
-```bash
-# .env
-OPENAI_API_KEY=sk-your-openai-key-here
-```
-
-**Run the backend:**
 ```bash
 cd backend
-python -m uvicorn main:app --reload --port 8000
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
 
-Backend runs at: `http://localhost:8000`
+Backend runs at **http://localhost:8000**
 
----
+> Optional `.env` in `backend/` to lock down CORS in production:
+> ```bash
+> ALLOWED_ORIGINS=https://your-frontend.vercel.app
+> ```
 
-### 3. Frontend setup
+### 2 — Frontend
 
 ```bash
 cd frontend
 npm install
 ```
 
-**Create `.env.local` inside the `frontend/` folder:**
+Create `frontend/.env.local`:
+
 ```bash
-# frontend/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-**Run the frontend:**
 ```bash
 npm run dev
 ```
 
-Frontend runs at: `http://localhost:3000`
+Frontend runs at **http://localhost:3000**
+
+### 3 — Try it
+
+1. Open **http://localhost:3000** and click **Format your resume**
+2. Upload a PDF/DOCX (or paste text) → **Format resume →**
+3. Keep / skip / edit each section, watching the live preview
+4. Download as **DOCX** or **PDF** 🎉
+
+> [!IMPORTANT]
+> **DOCX export works everywhere out of the box.** **PDF export** needs a converter: LibreOffice on Linux/Mac (and in the Docker image), or on Windows `pip install docx2pdf pywin32` with MS Word installed.
 
 ---
 
-### 4. Test it locally
+## 🔌 API Reference
 
-Open `http://localhost:3000` in your browser:
-1. Upload a PDF or DOCX resume
-2. Click **Start Formatting**
-3. Download the result as **DOCX** or **PDF**
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET`  | `/` | Health check |
+| `POST` | `/format` | Parse an uploaded `file` **or** `plain_text` → structured resume **JSON** |
+| `POST` | `/build` | Render approved resume JSON → DOCX; returns `docx_url` + `pdf_url` |
+| `GET`  | `/download/{job_id}/docx` | Download the generated DOCX |
+| `GET`  | `/download/{job_id}/pdf` | Convert (cached) and download the PDF |
+
+---
+
+## 🧪 Testing
+
+The real test suite lives in `backend/tests/` (parser, structurer, and HTTP/API tests):
+
+```bash
+cd backend
+python -m pytest -q
+```
+
+> ✅ **32 tests** cover lossless structuring across multiple resume layouts and the full `/format` → `/build` → `/download` flow.
 
 ---
 
-### Testing individual components
+## ☁️ Deployment
 
-**Test PDF/DOCX parser only:**
-```bash
-python test_parser.py "path/to/resume.pdf"
-python test_parser.py "path/to/resume.docx"
-```
+| Part | Where | How |
+|------|-------|-----|
+| 🖥️ Frontend | **Vercel** | Auto-builds from `vercel.json`. Set `NEXT_PUBLIC_API_URL` to your backend URL. |
+| ⚙️ Backend | **Render** | `render.yaml` deploys the `Dockerfile` (Docker runtime). The image installs **LibreOffice** so PDF export works in the cloud. Set `ALLOWED_ORIGINS`. |
 
-**Test OpenAI structurer only:**
-```bash
-python test_structurer.py "path/to/resume.docx"
-```
-
-**Test full formatter (no frontend needed):**
-```bash
-python test_formatter.py "path/to/resume.docx"
-# Output saved to: outputs/CandidateName_compact_v1.docx
-```
+> [!NOTE]
+> `uploads/` and `outputs/` are **ephemeral local disk** — fine for the request/response cycle, but files don't persist across restarts on serverless/Render.
 
 ---
+
+## 💙 Design Principles
+
+| Principle | What it means |
+|-----------|---------------|
+| 🚫 **Never adds data** | Rules can't invent. Nothing appears in your resume that wasn't in the source. |
+| 🛟 **Never drops data** | Unrecognised lines are kept verbatim (worst case: under *Additional Information*), so a parsing miss can never silently lose a word. |
+| 🎯 **What you see is what you download** | The live A4 preview is rendered from the same structured data as the DOCX. |
+| ✋ **You're in control** | Every section is reviewed and editable before anything is built. |
+
+<div align="center">
+
+---
+
+**Reformat without losing a single word.** 🩵
+
+</div>
