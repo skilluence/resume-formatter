@@ -191,10 +191,10 @@ def _add_job_header(doc, title: str, company: str, location: str, start: str, en
     p = doc.add_paragraph()
     _set_spacing(p, before=2, after=0)
 
-    left_text = f"{title}  |  {company}"
-    if location:
-        left_text += f"  |  {location}"
-    date_text = f"{start} – {end}"
+    # Join only the parts that are actually present — an empty title/company
+    # must never leave a dangling "  |  " before the next field.
+    left_text = "  |  ".join(p.strip() for p in (title, company, location) if p and p.strip())
+    date_text = " – ".join(d.strip() for d in (start, end) if d and d.strip())
 
     run_left = p.add_run(left_text)
     run_left.bold = True

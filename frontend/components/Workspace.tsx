@@ -160,7 +160,7 @@ export default function Workspace() {
   const inReview = stage === "review" && resume != null;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: tk.surface, fontFamily: tk.sans }}>
+    <div style={{ height: narrow ? "auto" : "100vh", minHeight: "100vh", display: "flex", flexDirection: "column", overflow: narrow ? "visible" : "hidden", background: tk.surface, fontFamily: tk.sans }}>
       <Header />
       <div style={{ flex: 1, display: "flex", flexDirection: narrow ? "column" : "row", alignItems: "stretch", minHeight: 0 }}>
         {/* LEFT rail */}
@@ -238,7 +238,7 @@ function Header() {
 }
 function Footer() {
   return (
-    <footer style={{ borderTop: `1px solid ${tk.borderTertiary}`, background: tk.surfaceSecondary, padding: "16px clamp(16px,4vw,40px)" }}>
+    <footer style={{ borderTop: `1px solid ${tk.borderTertiary}`, background: tk.surfaceSecondary, padding: "16px clamp(16px,4vw,40px)", flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
         <span style={{ fontFamily: tk.serif, fontSize: "13.5px", color: tk.onSurfaceSecondary }}>Resume Formatter</span>
         <span style={{ fontFamily: tk.sans, fontSize: "12px", color: tk.onSurfaceTertiary }}>The cleanest way to format a resume — every word preserved.</span>

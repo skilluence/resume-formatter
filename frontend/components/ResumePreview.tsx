@@ -145,9 +145,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean): React
       head: (
         <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "3px 0 0", gap: "8px" }}>
           <span style={{ fontWeight: 700 }}>
-            {job.title}
-            {job.company ? `  |  ${job.company}` : ""}
-            {job.location ? `  |  ${job.location}` : ""}
+            {[job.title, job.company, job.location].filter(Boolean).join("  |  ")}
           </span>
           <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{[job.start_date, job.end_date].filter(Boolean).join(" – ")}</span>
         </p>
