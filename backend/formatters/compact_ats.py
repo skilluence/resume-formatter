@@ -1,5 +1,5 @@
 from docx import Document
-from docx.shared import Pt, Inches, Mm, RGBColor
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -21,13 +21,14 @@ BODY_SIZE = Pt(9)
 HEADER_SIZE = Pt(9.5)
 MARGIN = Inches(0.20)
 COBALT_BLUE = RGBColor(0, 71, 171)
-HEADLINE_GRAY = RGBColor(64, 64, 64)
+HEADLINE_GRAY = RGBColor(80, 80, 80)
 
-# A4 page (210 mm wide). Right-align tab stops sit at the page width minus the
-# two side margins, expressed in twips (1 inch = 1440 twips).
-A4_WIDTH = Mm(210)
-A4_HEIGHT = Mm(297)
-USABLE_WIDTH_TWIPS = int((210 / 25.4 - 2 * 0.20) * 1440)
+# US Letter page (8.5 in wide) — the US-market standard this product targets.
+# Right-align tab stops sit at the page width minus the two side margins,
+# expressed in twips (1 inch = 1440 twips).
+LETTER_WIDTH = Inches(8.5)
+LETTER_HEIGHT = Inches(11)
+USABLE_WIDTH_TWIPS = int((8.5 - 2 * 0.20) * 1440)
 
 
 def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
@@ -45,8 +46,8 @@ def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
 
 def _set_margins(doc):
     section = doc.sections[0]
-    section.page_width = A4_WIDTH
-    section.page_height = A4_HEIGHT
+    section.page_width = LETTER_WIDTH
+    section.page_height = LETTER_HEIGHT
     section.top_margin = MARGIN
     section.bottom_margin = MARGIN
     section.left_margin = MARGIN
