@@ -15,18 +15,34 @@ import glob
 import tempfile
 
 import pytest
+from docx import Document
+from docx.oxml.ns import qn
 
 import structurer as S
 from formatters.compact_ats import format_compact
 from parsers.pdf_parser import extract_text_from_pdf
 from parsers.docx_parser import extract_text_from_docx
 
-DEMO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "demoResume")
+# Real candidate resumes live in ../DemoResumes (drop more in to expand coverage).
+DEMO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "DemoResumes")
 DEMO_FILES = sorted(glob.glob(os.path.join(DEMO_DIR, "*.pdf")) + glob.glob(os.path.join(DEMO_DIR, "*.docx")))
 
 
 def _toks(s):
     return [t for t in re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split() if t]
+
+
+def _docx_all_tokens(path):
+    """Every token in the rendered DOCX — visible text PLUS hyperlink targets
+    (a 'LinkedIn' link keeps its URL in the relationship, not in the text)."""
+    doc = Document(path)
+    out = set()
+    for node in doc.element.body.iter(qn("w:t")):
+        out |= set(_toks(node.text))
+    for rel in doc.part.rels.values():
+        if "hyperlink" in rel.reltype:
+            out |= set(_toks(rel.target_ref))
+    return out
 
 
 # ── unit: heading detection ──────────────────────────────────────────────────
@@ -39,6 +55,48 @@ def test_known_and_keyword_headings():
     assert S._heading_type("PROJECT MANAGEMENT SKILLS") == "skills"
     # a Title-Case job title must NOT be mistaken for a section
     assert S._heading_type("Project Manager") is None
+
+
+# ── unit: header with an ALL-CAPS job title under the name ───────────────────
+
+def test_allcaps_headline_and_contact_are_captured_not_stranded():
+    # Regression: an ALL-CAPS title like "AI/ML ENGINEER" under the name used to
+    # be mistaken for a section heading, stranding the title + contact line in a
+    # body section that rendered below Projects.
+    raw = "\n".join([
+        "RUTVIK DESHMUKH",
+        "AI/ML ENGINEER",
+        "+1 (551)-344-8461 | rutvik@gmail.com | LinkedIn | GitHub | MD, USA",
+        "PROFESSIONAL SUMMARY",
+        "AI/ML engineer with experience building systems.",
+    ])
+    data = S.structure_resume(raw)
+    assert data["name"] == "RUTVIK DESHMUKH"
+    assert data["headline"] == "AI/ML ENGINEER"
+    assert data["contact"]["email"] == "rutvik@gmail.com"
+    assert data["contact"]["location"] == "MD, USA"
+    # title/contact must NOT be stranded in an additional (below-Projects) section
+    blob = " ".join(
+        (s.get("heading", "") + " " + " ".join(s.get("items", []) or []) + " " + (s.get("text") or ""))
+        for s in data["additional_sections"]
+    )
+    assert "AI/ML ENGINEER" not in blob
+    assert "rutvik@gmail.com" not in blob
+
+
+def test_generic_allcaps_section_right_after_name_is_still_a_section():
+    # The header fix must not over-absorb: a real ALL-CAPS section immediately
+    # under the name (no contact line above it) stays a section, not a headline.
+    raw = "\n".join([
+        "JANE DOE",
+        "AWARDS",
+        "Employee of the Year 2024",
+        "PROFESSIONAL SUMMARY",
+        "Did good work.",
+    ])
+    data = S.structure_resume(raw)
+    assert data["headline"] is None
+    assert any(s.get("heading", "").lower() == "awards" for s in data["additional_sections"])
 
 
 # ── unit: experience headers across templates ────────────────────────────────
@@ -85,6 +143,164 @@ def test_glyphless_bullets_are_not_split_into_projects():
 
 
 # ── unit: education GPA goes to its own toggle-able field ─────────────────────
+
+def test_education_single_date_two_entries():
+    # Regression: 'Degree  GradDate' / 'Institution' with SINGLE dates (not ranges).
+    # Used to leak the date into the degree and demote the 2nd degree to bullets.
+    edus = S._parse_education([
+        "Masters in Data Analytics and Engineering Dec 2025",
+        "George Mason University",
+        "Bachelor of Technology in Computer Science and Engineering May 2023",
+        "Jawaharlal Nehru Technological University",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["degree"] == "Masters in Data Analytics and Engineering"
+    assert edus[0]["graduation_date"] == "Dec 2025"
+    assert edus[0]["institution"] == "George Mason University"
+    assert edus[1]["degree"].startswith("Bachelor of Technology")
+    assert edus[1]["graduation_date"] == "May 2023"
+    assert edus[1]["institution"] == "Jawaharlal Nehru Technological University"
+    assert edus[0]["details"] == [] and edus[1]["details"] == []
+
+
+def test_education_date_on_its_own_line_with_gpa_location_coursework():
+    edus = S._parse_education([
+        "Master of Science in Information Systems",
+        "Aug 2024 – Dec 2025",
+        "University of Maryland, Robert H. Smith School of Business | GPA: 3.5/4.0 | College Park, MD",
+        "Bachelor of Technology in Computer Science",
+        "Aug 2020 – Jun 2024",
+        "Gujarat Technological University | GPA: 3.78/4.0 | Ahmedabad, India | Relevant Coursework: ML, NLP",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["graduation_date"] == "Aug 2024 – Dec 2025"
+    assert edus[0]["gpa"] == "GPA: 3.5/4.0"
+    assert edus[0]["location"] == "College Park, MD"
+    assert "University of Maryland" in edus[0]["institution"]
+    assert edus[1]["gpa"] == "GPA: 3.78/4.0"
+    assert any("Coursework" in d for d in edus[1]["details"])
+
+
+def test_education_institution_first_ordering():
+    edus = S._parse_education([
+        "KENNESAW STATE UNIVERSITY May 2025",
+        "Masters in computer science",
+        "SRM University April 2022",
+        "Electronics and communication engineering",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["institution"] == "KENNESAW STATE UNIVERSITY"
+    assert edus[0]["graduation_date"] == "May 2025"
+    assert "computer science" in edus[0]["degree"].lower()
+    assert edus[1]["institution"] == "SRM University"
+
+
+def test_education_degree_pipe_institution_one_line():
+    edus = S._parse_education([
+        "Master's in Science in Computer Science | The University of Texas at Arlington Dec 2024",
+        "Bachelor's of Engineering | Gujarat Technological University July 2022",
+    ])
+    assert len(edus) == 2
+    assert "Computer Science" in edus[0]["degree"]
+    assert "University of Texas" in edus[0]["institution"]
+    assert edus[0]["graduation_date"] == "Dec 2024"
+    assert "Gujarat Technological University" in edus[1]["institution"]
+
+
+def test_state_code_not_mistaken_for_a_degree():
+    # 'Boston, MA' must NOT be split off as an M.A. degree.
+    edus = S._parse_education([
+        "Masters in Quantitative Finance Dec 2024",
+        "Northeastern University | Boston, MA",
+    ])
+    assert len(edus) == 1
+    assert "Northeastern University" in edus[0]["institution"]
+    assert edus[0]["graduation_date"] == "Dec 2024"
+
+
+def test_education_bare_year_range_on_own_line():
+    # A digit-leading date line must be extracted, not glued onto the degree.
+    edus = S._parse_education([
+        "Master of Business Administration",
+        "2022 - 2024",
+        "Harvard Business School | GPA: 3.7 | Boston, MA",
+    ])
+    assert len(edus) == 1
+    assert edus[0]["graduation_date"] == "2022 – 2024"
+    assert "2022" not in edus[0]["degree"]
+    assert edus[0]["gpa"] == "GPA: 3.7" and edus[0]["location"] == "Boston, MA"
+
+
+def test_education_keywordless_school_pipe_line_splits():
+    # "MIT" has no university/college keyword but the pipe line must still split.
+    edus = S._parse_education(["B.S. Mechanical Engineering | MIT | 3.9/4.0 | Cambridge, MA"])
+    assert len(edus) == 1
+    assert edus[0]["institution"] == "MIT"
+    assert edus[0]["gpa"] == "3.9/4.0"
+    assert edus[0]["location"] == "Cambridge, MA"
+    assert "MIT" not in edus[0]["degree"]
+
+
+def test_education_faculty_of_stays_with_degree():
+    # "Institute of Design" is the major, NOT the school; the real school follows.
+    edus = S._parse_education([
+        "Master of Science - Institute of Design  Dec 2025",
+        "Illinois Tech",
+        "Bachelor of Engineering  May 2021",
+        "Birla Institute of Technology",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["institution"] == "Illinois Tech"
+    assert "Institute of Design" in edus[0]["degree"]
+    assert edus[1]["institution"] == "Birla Institute of Technology"
+
+
+def test_education_trailing_lines_never_make_phantom_entries():
+    # Honors / a stray location / "Anticipated Graduation" must fold into the one
+    # entry, never fabricate a second degree.
+    edus = S._parse_education([
+        "Bachelor of Arts in Economics",
+        "Yale University | New Haven, CT",
+        "May 2024",
+        "Dean's List (all semesters)",
+        "Honors: Magna Cum Laude",
+        "Evanston, IL",
+    ])
+    assert len(edus) == 1
+    assert edus[0]["graduation_date"] == "May 2024"
+    assert edus[0]["institution"] == "Yale University"
+    assert len(edus[0]["details"]) >= 2  # the honors lines kept as details
+
+
+def test_education_indian_secondary_school_levels():
+    edus = S._parse_education([
+        "Class XII (CBSE), 2018, 88.4%",
+        "Delhi Public School, New Delhi",
+        "Class X (CBSE), 2016, 9.6 CGPA",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["graduation_date"] == "2018" and "88.4%" in (edus[0]["gpa"] or "")
+    assert "88.4%" not in edus[0]["degree"]
+
+
+def test_education_degree_with_date_and_country_then_institution():
+    # 'DEGREE  Date | Country' then 'Institution' — the country is a LOCATION (not
+    # the school), and a keyword-less degree name still aligns to its own school.
+    edus = S._parse_education([
+        "MASTERS IN INFORMATION STUDIES Aug 2023 - Dec 2025 | USA",
+        "Trine University",
+        "COMPUTER SCIENCE ENGINEERING Jun 2018 - Feb 2022 | IND",
+        "Shadan College Of Engineering",
+    ])
+    assert len(edus) == 2
+    assert edus[0]["degree"] == "MASTERS IN INFORMATION STUDIES"
+    assert edus[0]["institution"] == "Trine University"
+    assert edus[0]["location"] == "USA"
+    assert edus[0]["graduation_date"] == "Aug 2023 – Dec 2025"
+    assert edus[1]["degree"] == "COMPUTER SCIENCE ENGINEERING"
+    assert edus[1]["institution"] == "Shadan College Of Engineering"
+    assert edus[1]["location"] == "IND"
+
 
 def test_education_gpa_and_details():
     edus = S._parse_education([
@@ -168,7 +384,7 @@ def test_no_data_lost_through_full_pipeline(path, tmp_path):
 
     out_path = str(tmp_path / "out.docx")
     format_compact(resume, out_path)
-    rendered_tokens = set(_toks(extract_text_from_docx(out_path)))
+    rendered_tokens = _docx_all_tokens(out_path)
 
     # every content token from the source must appear in the final DOCX
     missing = []

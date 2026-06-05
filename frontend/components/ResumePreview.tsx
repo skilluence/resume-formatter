@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, CSSProperties, ReactNode } from "react";
 import { tk, doc } from "@/lib/tokens";
-import type { Resume, StatusMap } from "@/lib/resume";
+import { isCoursework, type Resume, type StatusMap } from "@/lib/resume";
 
 /* ────────────────────────────────────────────────────────────────────────────
    ResumePreview — the live document as real, paginated A4 pages (like Word).
@@ -26,10 +26,12 @@ interface Props {
   resume: Resume;
   status: StatusMap;
   showGpa: boolean;
+  sectionOrder?: string[];
+  showCoursework?: boolean;
 }
 
-export default function ResumePreview({ resume, status, showGpa }: Props) {
-  const blocks = useMemo(() => buildBlocks(resume, status, showGpa), [resume, status, showGpa]);
+export default function ResumePreview({ resume, status, showGpa, sectionOrder, showCoursework }: Props) {
+  const blocks = useMemo(() => buildBlocks(resume, status, showGpa, sectionOrder, showCoursework), [resume, status, showGpa, sectionOrder, showCoursework]);
   const measureRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<number[][]>([blocks.map((_, i) => i)]);
@@ -107,7 +109,7 @@ function eqPages(a: number[][], b: number[][]) {
 }
 
 /* ── build the ordered list of atomic blocks ────────────────────────────── */
-function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean): ReactNode[] {
+function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?: string[], showCoursework?: boolean): ReactNode[] {
   const kept = (id: string) => status[id] !== "skipped";
   const out: ReactNode[] = [];
 
@@ -125,86 +127,120 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean): React
     for (let i = 1; i < lines.length; i++) out.push(<div key={`${id}-${i}`}>{lines[i]}</div>);
   };
 
-  if (resume.summary) section("summary", "Professional Summary", [<p key="s" style={bodyJustify}>{resume.summary}</p>]);
+  const emitSummary = () => {
+    if (resume.summary) section("summary", "Professional Summary", [<p key="s" style={bodyJustify}>{resume.summary}</p>]);
+  };
 
-  if (resume.skills && Object.keys(resume.skills).length > 0) {
-    section(
-      "skills",
-      "Technical Skills",
-      Object.entries(resume.skills).map(([cat, items], i) => (
-        <p key={i} style={{ ...bodyText, margin: "0 0 2px" }}>
-          <span style={{ fontWeight: 700 }}>{cat}: </span>
-          {items.join(", ")}
-        </p>
-      ))
-    );
-  }
+  const emitSkills = () => {
+    if (resume.skills && Object.keys(resume.skills).length > 0) {
+      section(
+        "skills",
+        "Technical Skills",
+        Object.entries(resume.skills).map(([cat, items], i) => (
+          <p key={i} style={{ ...bodyText, margin: "0 0 2px" }}>
+            <span style={{ fontWeight: 700 }}>{cat}: </span>
+            {items.join(", ")}
+          </p>
+        ))
+      );
+    }
+  };
 
-  if (resume.experience?.length > 0) {
-    section("experience", "Professional Experience", entriesToLines(resume.experience.map((job) => ({
-      head: (
-        <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "3px 0 0", gap: "8px" }}>
-          <span style={{ fontWeight: 700 }}>
-            {[job.title, job.company, job.location].filter(Boolean).join("  |  ")}
-          </span>
-          <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{[job.start_date, job.end_date].filter(Boolean).join(" – ")}</span>
-        </p>
-      ),
-      bullets: job.bullets,
-    }))));
-  }
+  const emitExperience = () => {
+    if (resume.experience?.length > 0) {
+      section("experience", "Professional Experience", entriesToLines(resume.experience.map((job) => ({
+        head: (
+          <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "3px 0 0", gap: "8px" }}>
+            <span style={{ fontWeight: 700 }}>
+              {[job.title, job.company, job.location].filter(Boolean).join("  |  ")}
+            </span>
+            <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{[job.start_date, job.end_date].filter(Boolean).join(" – ")}</span>
+          </p>
+        ),
+        bullets: job.bullets,
+      }))));
+    }
+  };
 
-  if (resume.projects?.length > 0) {
-    section("projects", "Projects", entriesToLines(resume.projects.map((p) => ({
-      head: (
-        <p style={{ ...bodyText, margin: "3px 0 0" }}>
-          <span style={{ fontWeight: 700 }}>{p.name}</span>
-          {p.tech_stack ? <span style={{ fontStyle: "italic" }}>{`  |  ${p.tech_stack}`}</span> : null}
-        </p>
-      ),
-      bullets: p.bullets,
-    }))));
-  }
+  const emitProjects = () => {
+    if (resume.projects?.length > 0) {
+      section("projects", "Projects", entriesToLines(resume.projects.map((p) => ({
+        head: (
+          <p style={{ ...bodyText, margin: "3px 0 0" }}>
+            <span style={{ fontWeight: 700 }}>{p.name}</span>
+            {p.tech_stack ? <span style={{ fontStyle: "italic" }}>{`  |  ${p.tech_stack}`}</span> : null}
+          </p>
+        ),
+        bullets: p.bullets,
+      }))));
+    }
+  };
 
-  if (resume.certifications?.length > 0) {
-    section("certifications", "Certifications", entriesToLines(resume.certifications.map((c) => ({
-      head: (
-        <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "1px 0", gap: "8px" }}>
-          <span>
-            <span style={{ fontWeight: 700 }}>{c.name}</span>
-            {c.issuer ? `  |  ${c.issuer}` : ""}
-          </span>
-          {c.date ? <span style={{ whiteSpace: "nowrap" }}>{c.date}</span> : null}
-        </p>
-      ),
-      bullets: c.bullets,
-    }))));
-  }
+  const emitCertifications = () => {
+    if (resume.certifications?.length > 0) {
+      section("certifications", "Certifications", entriesToLines(resume.certifications.map((c) => ({
+        head: (
+          <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "1px 0", gap: "8px" }}>
+            <span>
+              <span style={{ fontWeight: 700 }}>{c.name}</span>
+              {c.issuer ? `  |  ${c.issuer}` : ""}
+            </span>
+            {c.date ? <span style={{ whiteSpace: "nowrap" }}>{c.date}</span> : null}
+          </p>
+        ),
+        bullets: c.bullets,
+      }))));
+    }
+  };
 
-  (resume.additional_sections || []).forEach((sec, i) => {
+  const emitEducation = () => {
+    if (resume.education?.length > 0) {
+      section("education", "Education", resume.education.map((e, i) => (
+        <div key={i} style={{ marginBottom: "3px" }}>
+          <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "1px 0 0", gap: "8px" }}>
+            <span style={{ fontWeight: 700 }}>{e.degree}</span>
+            {e.graduation_date ? <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{e.graduation_date}</span> : null}
+          </p>
+          <p style={{ ...bodyText, margin: 0 }}>
+            {[e.institution, e.location].filter(Boolean).join("  |  ")}
+          </p>
+          {showGpa && e.gpa ? <p style={{ ...bodyText, margin: 0 }}>{e.gpa}</p> : null}
+          {e.details.filter((d) => showCoursework || !isCoursework(d)).map((d, j) => (
+            <Bullet key={j}>{d}</Bullet>
+          ))}
+        </div>
+      )));
+    }
+  };
+
+  const emitAdditional = (i: number) => {
+    const sec = (resume.additional_sections || [])[i];
+    if (!sec) return;
     const lines: ReactNode[] = [];
     if (sec.text) lines.push(<p key="t" style={bodyJustify}>{sec.text}</p>);
     sec.items.forEach((it, j) => lines.push(<Bullet key={j}>{it}</Bullet>));
     section(`additional-${i}`, sec.heading, lines);
-  });
+  };
 
-  if (resume.education?.length > 0) {
-    section("education", "Education", resume.education.map((e, i) => (
-      <div key={i} style={{ marginBottom: "3px" }}>
-        <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "1px 0 0", gap: "8px" }}>
-          <span style={{ fontWeight: 700 }}>{e.degree}</span>
-          {e.graduation_date ? <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{e.graduation_date}</span> : null}
-        </p>
-        <p style={{ ...bodyText, margin: 0 }}>
-          {e.institution}
-          {e.location ? `  |  ${e.location}` : ""}
-        </p>
-        {showGpa && e.gpa ? <p style={{ ...bodyText, margin: 0 }}>{e.gpa}</p> : null}
-        {e.details.map((d, j) => (
-          <Bullet key={j}>{d}</Bullet>
-        ))}
-      </div>
-    )));
+  const emitters: Record<string, () => void> = {
+    skills: emitSkills,
+    experience: emitExperience,
+    projects: emitProjects,
+    certifications: emitCertifications,
+    education: emitEducation,
+  };
+
+  // Summary is pinned at the top; everything below follows the chosen order.
+  emitSummary();
+
+  const bodyOrder = order && order.length
+    ? order
+    : ["skills", "experience", "projects", "certifications",
+       ...(resume.additional_sections || []).map((_, i) => `additional-${i}`), "education"];
+
+  for (const key of bodyOrder) {
+    if (key.startsWith("additional-")) emitAdditional(parseInt(key.split("-")[1], 10));
+    else emitters[key]?.();
   }
 
   return out;
@@ -251,9 +287,12 @@ function ContactLine({ resume }: { resume: Resume }) {
   const c = resume.contact;
   const segs: { text: string; href?: string }[] = [];
   if (c.phone) segs.push({ text: c.phone });
-  if (c.email) segs.push({ text: c.email.replace(/^mailto:/, ""), href: `mailto:${c.email.replace(/^mailto:/, "")}` });
-  if (c.linkedin) segs.push({ text: "LinkedIn", href: ensureUrl(c.linkedin) });
-  if (c.github) segs.push({ text: "GitHub", href: ensureUrl(c.github) });
+  if (c.email) {
+    const addr = c.email.replace(/^mailto:/, "");
+    segs.push({ text: c.email_label || addr, href: `mailto:${addr}` });
+  }
+  if (c.linkedin || c.linkedin_label) segs.push({ text: c.linkedin_label || "LinkedIn", href: c.linkedin ? ensureUrl(c.linkedin) : undefined });
+  if (c.github || c.github_label) segs.push({ text: c.github_label || "GitHub", href: c.github ? ensureUrl(c.github) : undefined });
   (c.links || []).forEach((l) => l.url && segs.push({ text: l.label || l.url, href: ensureUrl(l.url) }));
   if (c.location) segs.push({ text: c.location });
   return (

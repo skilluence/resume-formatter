@@ -52,8 +52,8 @@ Upload a PDF or DOCX → review every section live → download a polished **DOC
 ```
 
 1. **`POST /format`** parses the upload and returns structured **JSON** — no document is written yet.
-2. You **review and edit** each section in the two-pane UI (fixed left rail · scrollable live document on the right).
-3. **`POST /build`** renders *exactly* what you approved into a DOCX and returns download links.
+2. You **review and edit** each section in the two-pane UI (fixed left rail · scrollable live document on the right). Edit links (display text + URL), and **drag sections to reorder** everything after the summary.
+3. **`POST /build`** renders *exactly* what you approved and **streams the DOCX straight back in one request** — nothing is persisted to disk, so there's no second request to fail.
 
 ---
 
@@ -75,15 +75,16 @@ Upload a PDF or DOCX → review every section live → download a polished **DOC
 ```
 resumeFormat/
 ├── backend/
-│   ├── main.py                 # FastAPI app: /format, /build, /download/{id}/{docx,pdf}
+│   ├── main.py                 # FastAPI app: /format, /build, /build/pdf (streams files back)
 │   ├── structurer.py           # 🧠 Rule-based resume → structured JSON (no AI)
 │   ├── parsers/
 │   │   ├── pdf_parser.py        # Extract text from PDF (pdfplumber)
 │   │   └── docx_parser.py       # Extract text from DOCX (python-docx)
 │   ├── formatters/
-│   │   └── compact_ats.py       # Build the styled ATS DOCX
-│   ├── tests/                   # pytest suite (32 tests)
+│   │   └── compact_ats.py       # Build the styled ATS DOCX (resilient + reorderable)
+│   ├── tests/                   # pytest suite — incl. a fidelity sweep over every DemoResumes/ file
 │   └── requirements.txt
+├── DemoResumes/                # Real sample resumes the test suite runs end-to-end
 ├── frontend/
 │   ├── app/
 │   │   ├── page.tsx             # "/"        landing page
@@ -163,11 +164,12 @@ Frontend runs at **http://localhost:3000**
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `GET`  | `/` | Health check |
-| `POST` | `/format` | Parse an uploaded `file` **or** `plain_text` → structured resume **JSON** |
-| `POST` | `/build` | Render approved resume JSON → DOCX; returns `docx_url` + `pdf_url` |
-| `GET`  | `/download/{job_id}/docx` | Download the generated DOCX |
-| `GET`  | `/download/{job_id}/pdf` | Convert (cached) and download the PDF |
+| `GET`  | `/` | Health check / warm-up ping |
+| `POST` | `/format` | Parse an uploaded `file` **or** `plain_text` → structured resume **JSON** (clear `400` on unreadable/scanned/`.doc` files) |
+| `POST` | `/build` | Render approved resume JSON → **streams the DOCX** back directly (`application/…wordprocessingml.document`) |
+| `POST` | `/build/pdf` | Render + convert → **streams the PDF** back directly |
+
+> The body is `{"resume": { …structured resume, optional "section_order": [...] }}`. The build never crashes on a malformed/edited link — a bad URL degrades to plain text — and falls back to a minimal text DOCX rather than failing outright.
 
 ---
 
@@ -180,7 +182,7 @@ cd backend
 python -m pytest -q
 ```
 
-> ✅ **32 tests** cover lossless structuring across multiple resume layouts and the full `/format` → `/build` → `/download` flow.
+> ✅ **100+ tests** cover lossless structuring, hyperlink safety, section reordering, parser error handling, and a **full-pipeline fidelity sweep over every file in `DemoResumes/`** — so a regression on any real resume fails the build. Run `pytest -v` to see each resume checked by name.
 
 ---
 
@@ -188,11 +190,14 @@ python -m pytest -q
 
 | Part | Where | How |
 |------|-------|-----|
-| 🖥️ Frontend | **Vercel** | Auto-builds from `vercel.json`. Set `NEXT_PUBLIC_API_URL` to your backend URL. |
-| ⚙️ Backend | **Render** | `render.yaml` deploys the `Dockerfile` (Docker runtime). The image installs **LibreOffice** so PDF export works in the cloud. Set `ALLOWED_ORIGINS`. |
+| 🖥️ Frontend | **Vercel** | Auto-builds from `vercel.json`. **Set `NEXT_PUBLIC_API_URL`** in the Vercel project to your backend's **https** URL (e.g. `https://your-api.onrender.com`). |
+| ⚙️ Backend | **Render** | `render.yaml` deploys the `Dockerfile` (Docker runtime). The image installs **LibreOffice** so PDF export works in the cloud. Set `ALLOWED_ORIGINS` (or leave `*`). |
+
+> [!WARNING]
+> **Most "Failed to fetch" errors on the live site come from a missing/wrong `NEXT_PUBLIC_API_URL`.** It is baked in at *build time*, so if it's unset the production bundle calls `localhost` (or, over https, is blocked as mixed content). Always set it to the backend's **https** URL and redeploy the frontend. On Render's free tier the backend also **cold-starts** (~30–60s) after idle — the app warms it and retries automatically, and you can always use **“Download my edits”** to save your work meanwhile.
 
 > [!NOTE]
-> `uploads/` and `outputs/` are **ephemeral local disk** — fine for the request/response cycle, but files don't persist across restarts on serverless/Render.
+> Builds **stream the file back in one request** (no persisted `outputs/`); `uploads/` is only a transient scratch dir that's deleted right after parsing.
 
 ---
 

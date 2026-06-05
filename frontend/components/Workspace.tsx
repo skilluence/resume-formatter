@@ -12,6 +12,7 @@ import {
   reviewedCount,
   allReviewed,
   buildPayload,
+  isCoursework,
 } from "@/lib/resume";
 import SectionCard, { SectionEditor } from "@/components/SectionCard";
 import ResumePreview from "@/components/ResumePreview";
@@ -43,10 +44,13 @@ export default function Workspace() {
 
   const [status, setStatusMap] = useState<StatusMap>({});
   const [showGpa, setShowGpa] = useState(true);
+  const [showCoursework, setShowCoursework] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState("");
   const [narrow, setNarrow] = useState(false);
+  const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
 
   const isLoading = stage === "uploading" || stage === "formatting";
 
@@ -66,8 +70,11 @@ export default function Workspace() {
   const resetReview = () => {
     setStatusMap({});
     setShowGpa(true);
+    setShowCoursework(false);
     setEditing(null);
     setBuildError("");
+    setSectionOrder([]);
+    setDragId(null);
   };
   const startOver = () => {
     setFile(null);
@@ -99,6 +106,8 @@ export default function Workspace() {
       const parsed = res.data?.resume;
       if (!parsed || !parsed.name) throw new Error("The formatter returned an unexpected response.");
       setResume(parsed);
+      // Coursework toggle defaults ON when the uploaded resume actually has it.
+      setShowCoursework((parsed.education || []).some((e: { details?: string[] }) => (e.details || []).some(isCoursework)));
       setCandidateName(res.data.candidate_name || "Your");
       setProgress(100);
       setTimeout(() => setStage("review"), 350);
@@ -119,6 +128,27 @@ export default function Workspace() {
   const canDownload = resume != null && allReviewed(sections, status) && !building;
   const pct = total ? Math.round((done / total) * 100) : 0;
 
+  // Reorderable body = every section after the summary. Reconcile the user's
+  // chosen order with the sections actually present (skipped ones stay; new ones
+  // append) so the order is always valid.
+  const summaryMeta = sections.find((s) => s.id === "summary") || null;
+  const bodyIds = sections.filter((s) => s.id !== "summary").map((s) => s.id);
+  const orderedBodyIds = [
+    ...sectionOrder.filter((id) => bodyIds.includes(id)),
+    ...bodyIds.filter((id) => !sectionOrder.includes(id)),
+  ];
+  const labelOf = (id: string) => sections.find((s) => s.id === id)?.label || id;
+
+  const reorderSection = (from: string, to: string) => {
+    if (from === to) return;
+    const arr = [...orderedBodyIds];
+    const fi = arr.indexOf(from);
+    const ti = arr.indexOf(to);
+    if (fi < 0 || ti < 0) return;
+    arr.splice(ti, 0, arr.splice(fi, 1)[0]);
+    setSectionOrder(arr);
+  };
+
   const setStatus = (id: string, v: SectionStatus) => setStatusMap((m) => ({ ...m, [id]: v }));
   const toggleEdit = (id: string) =>
     setEditing((cur) => {
@@ -137,24 +167,73 @@ export default function Workspace() {
       return n;
     });
 
+  const safeName = (resume?.name || "resume").trim().replace(/\s+/g, "_") || "resume";
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  // Local safety net: never lose the user's edits even if the server is down.
+  const exportFallback = () => {
+    if (!resume) return;
+    const payload = buildPayload(resume, status, showGpa, orderedBodyIds, showCoursework);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    triggerBlobDownload(blob, `${safeName}_edits.json`);
+  };
+
   const download = async (format: "docx" | "pdf") => {
     if (!resume) return;
+    if (!API_URL) {
+      setBuildError("This app isn't configured with a backend URL (NEXT_PUBLIC_API_URL). Set it and redeploy.");
+      return;
+    }
     setBuilding(true);
     setBuildError("");
-    try {
-      const res = await fetch(`${API_URL}/build`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resume: buildPayload(resume, status, showGpa) }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || "Build failed.");
-      const data = await res.json();
-      window.open(`${API_URL}${format === "pdf" ? data.pdf_url : data.docx_url}`, "_blank");
-    } catch (e) {
-      setBuildError(e instanceof Error ? e.message : "Couldn't build your resume.");
-    } finally {
-      setBuilding(false);
+    const endpoint = format === "pdf" ? "/build/pdf" : "/build";
+    const filename = `${safeName}.${format}`;
+    const body = JSON.stringify({ resume: buildPayload(resume, status, showGpa, orderedBodyIds, showCoursework) });
+
+    let lastErr = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          // Warm a possibly-cold server (Render free tier sleeps), then back off.
+          await fetch(`${API_URL}/`, { method: "GET" }).catch(() => {});
+          await new Promise((r) => setTimeout(r, 800 * attempt));
+        }
+        const res = await fetch(`${API_URL}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (!res.ok) {
+          // The server answered — a real error, not connectivity. Show it, stop.
+          const detail = (await res.json().catch(() => null))?.detail;
+          throw new Error(detail || `Build failed (HTTP ${res.status}).`);
+        }
+        triggerBlobDownload(await res.blob(), filename);
+        setBuilding(false);
+        return;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        const isNetwork = e instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(lastErr);
+        if (!isNetwork) break; // a real server error — don't keep retrying
+      }
     }
+    setBuilding(false);
+    const networkish = /failed to fetch|networkerror|load failed/i.test(lastErr);
+    setBuildError(
+      networkish
+        ? "Couldn't reach the server — it may be waking up. Save your work with “Download my edits”, then try again in a moment."
+        : lastErr || "Couldn't build your resume."
+    );
   };
 
   const inReview = stage === "review" && resume != null;
@@ -169,9 +248,12 @@ export default function Workspace() {
             <ReviewRail
               name={candidateName}
               resume={resume}
-              sections={sections}
+              summaryMeta={summaryMeta}
+              bodyIds={orderedBodyIds}
+              labelOf={labelOf}
               status={status}
               showGpa={showGpa}
+              showCoursework={showCoursework}
               editing={editing}
               done={done}
               total={total}
@@ -179,14 +261,20 @@ export default function Workspace() {
               canDownload={canDownload}
               building={building}
               buildError={buildError}
+              dragId={dragId}
               onChange={setResume}
               onKeep={(id) => setStatus(id, "kept")}
               onSkip={skip}
               onToggleEdit={toggleEdit}
               onToggleGpa={() => setShowGpa((v) => !v)}
+              onToggleCoursework={() => setShowCoursework((v) => !v)}
               onApproveAll={approveAll}
               onDownload={download}
               onStartOver={startOver}
+              onExportFallback={exportFallback}
+              onDragStartSection={(id) => setDragId(id)}
+              onDropSection={(id) => { if (dragId) reorderSection(dragId, id); setDragId(null); }}
+              onDragEndSection={() => setDragId(null)}
             />
           ) : (
             <UploadCard
@@ -211,7 +299,7 @@ export default function Workspace() {
         {/* RIGHT canvas */}
         <main style={canvasStyle}>
           {inReview && resume ? (
-            <ResumePreview resume={resume} status={status} showGpa={showGpa} />
+            <ResumePreview resume={resume} status={status} showGpa={showGpa} sectionOrder={orderedBodyIds} showCoursework={showCoursework} />
           ) : isLoading ? (
             <SkeletonPage progress={progress} />
           ) : (
@@ -251,9 +339,12 @@ function Footer() {
 interface RailProps {
   name: string;
   resume: Resume;
-  sections: { id: string; label: string }[];
+  summaryMeta: { id: string; label: string } | null;
+  bodyIds: string[];
+  labelOf: (id: string) => string;
   status: StatusMap;
   showGpa: boolean;
+  showCoursework: boolean;
   editing: string | null;
   done: number;
   total: number;
@@ -261,16 +352,40 @@ interface RailProps {
   canDownload: boolean;
   building: boolean;
   buildError: string;
+  dragId: string | null;
   onChange: (r: Resume) => void;
   onKeep: (id: string) => void;
   onSkip: (id: string) => void;
   onToggleEdit: (id: string) => void;
   onToggleGpa: () => void;
+  onToggleCoursework: () => void;
   onApproveAll: () => void;
   onDownload: (f: "docx" | "pdf") => void;
   onStartOver: () => void;
+  onExportFallback: () => void;
+  onDragStartSection: (id: string) => void;
+  onDropSection: (id: string) => void;
+  onDragEndSection: () => void;
 }
 function ReviewRail(p: RailProps) {
+  const renderCard = (id: string) => (
+    <SectionCard
+      id={id}
+      label={p.labelOf(id)}
+      status={p.status[id] || "pending"}
+      editing={p.editing === id}
+      isEducation={id === "education"}
+      showGpa={p.showGpa}
+      showCoursework={p.showCoursework}
+      resume={p.resume}
+      onChange={p.onChange}
+      onKeep={() => p.onKeep(id)}
+      onSkip={() => p.onSkip(id)}
+      onToggleEdit={() => p.onToggleEdit(id)}
+      onToggleGpa={p.onToggleGpa}
+      onToggleCoursework={p.onToggleCoursework}
+    />
+  );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div>
@@ -286,9 +401,6 @@ function ReviewRail(p: RailProps) {
         <div role="progressbar" aria-valuenow={p.pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${p.done} of ${p.total} sections reviewed`} style={{ height: "7px", background: tk.surfaceTertiary, borderRadius: "999px", marginTop: "8px", overflow: "hidden" }}>
           <span style={{ display: "block", height: "100%", width: `${p.pct}%`, background: p.canDownload ? tk.green : `linear-gradient(90deg, ${tk.clay}, ${tk.clayInteractive})`, transition: "width 0.3s ease, background 0.3s ease" }} />
         </div>
-        {p.done < p.total && (
-          <button type="button" onClick={p.onApproveAll} style={ghostBtn}>Approve all remaining</button>
-        )}
       </div>
 
       {/* name & headline editor */}
@@ -303,31 +415,50 @@ function ReviewRail(p: RailProps) {
         )}
       </div>
 
-      {p.sections.map((s) => (
-        <SectionCard
-          key={s.id}
-          id={s.id}
-          label={s.label}
-          status={p.status[s.id] || "pending"}
-          editing={p.editing === s.id}
-          isEducation={s.id === "education"}
-          showGpa={p.showGpa}
-          resume={p.resume}
-          onChange={p.onChange}
-          onKeep={() => p.onKeep(s.id)}
-          onSkip={() => p.onSkip(s.id)}
-          onToggleEdit={() => p.onToggleEdit(s.id)}
-          onToggleGpa={p.onToggleGpa}
-        />
+      {/* Summary is pinned at the top; everything below is drag-to-reorder. */}
+      {p.summaryMeta && renderCard(p.summaryMeta.id)}
+
+      {p.bodyIds.length > 1 && (
+        <p style={{ fontFamily: tk.sans, fontSize: "11px", color: tk.onSurfaceTertiary, margin: "0 0 -2px", textAlign: "center" }}>
+          Drag <span aria-hidden>⠿</span> to reorder sections
+        </p>
+      )}
+
+      {p.bodyIds.map((id) => (
+        <div
+          key={id}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); p.onDropSection(id); }}
+          style={{ display: "flex", alignItems: "stretch", gap: "6px", opacity: p.dragId === id ? 0.45 : 1 }}
+        >
+          <div
+            draggable
+            onDragStart={() => p.onDragStartSection(id)}
+            onDragEnd={p.onDragEndSection}
+            title="Drag to reorder"
+            aria-label={`Reorder ${p.labelOf(id)}`}
+            style={{ display: "flex", alignItems: "center", padding: "0 2px", cursor: "grab", color: tk.onSurfaceGhost, fontSize: "16px", userSelect: "none" }}
+          >
+            ⠿
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>{renderCard(id)}</div>
+        </div>
       ))}
 
       <div style={{ ...cardStyle, background: tk.surfaceTertiary }}>
+        {p.done < p.total && (
+          <button type="button" onClick={p.onApproveAll} style={{ ...ghostBtn, marginTop: 0, marginBottom: "9px", borderColor: tk.clayInteractive, color: tk.clayInteractive, fontWeight: 600 }}>
+            ✓ Approve all remaining ({p.total - p.done})
+          </button>
+        )}
         {!p.canDownload && <p style={{ fontFamily: tk.sans, fontSize: "11.5px", color: tk.onSurfaceTertiary, margin: "0 0 9px", textAlign: "center" }}>{p.building ? "Building…" : `Review all ${p.total} sections to unlock`}</p>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
-          <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("docx")} style={dlBtn(p.canDownload, false)}>↓ DOCX</button>
-          <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("pdf")} style={dlBtn(p.canDownload, true)}>↓ PDF</button>
-        </div>
-        {p.buildError && <p role="alert" style={{ fontFamily: tk.sans, fontSize: "12px", color: tk.red, margin: "9px 0 0", textAlign: "center" }}>{p.buildError}</p>}
+        <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("docx")} style={{ ...dlBtn(p.canDownload, true), width: "100%" }}>↓ Download DOCX</button>
+        {p.buildError && (
+          <>
+            <p role="alert" style={{ fontFamily: tk.sans, fontSize: "12px", color: tk.red, margin: "9px 0 0", textAlign: "center" }}>{p.buildError}</p>
+            <button type="button" onClick={p.onExportFallback} style={{ ...ghostBtn }}>↓ Download my edits (.json)</button>
+          </>
+        )}
         <button type="button" onClick={p.onStartOver} style={{ ...ghostBtn, border: "none", color: tk.onSurfaceTertiary }}>Format another resume</button>
       </div>
     </div>
@@ -522,7 +653,7 @@ const headerStyle: CSSProperties = {
   flexShrink: 0,
 };
 const railStyle: CSSProperties = {
-  width: "444px",
+  width: "600px",
   flexShrink: 0,
   borderRight: `1px solid ${tk.borderTertiary}`,
   background: tk.surfaceSecondary,

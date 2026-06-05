@@ -4,7 +4,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import copy
+import logging
 import re
+
+logger = logging.getLogger("resume.formatter")
 
 # The "List Bullet" style already draws a marker, so strip any leading bullet
 # glyph the source carried (incl. Symbol/Wingdings PUA bullets like U+F0B7) to
@@ -58,7 +61,7 @@ def _add_name(doc, name: str):
     p = doc.add_paragraph()
     _set_spacing(p, before=0, after=2)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(name.upper())
+    run = p.add_run(str(name or "").upper())
     run.bold = True
     run.font.name = FONT_NAME
     run.font.size = NAME_SIZE
@@ -77,9 +80,33 @@ def _add_headline(doc, headline: str):
     run.font.color.rgb = HEADLINE_GRAY
 
 
+def _add_link_styled_run(paragraph, text: str):
+    """A plain run styled like a hyperlink (same cobalt blue + size) but with no
+    target. Used when a URL is missing or invalid so the visible text is always
+    preserved — a broken link never drops a word or aborts the document."""
+    run = paragraph.add_run(text)
+    run.font.name = FONT_NAME
+    run.font.size = BODY_SIZE
+    run.font.color.rgb = COBALT_BLUE
+
+
 def _add_hyperlink(paragraph, text: str, url: str):
-    part = paragraph.part
-    r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
+    """Render `text` as an external hyperlink. If the URL is empty or python-docx
+    can't build the relationship (e.g. a malformed/edited link), fall back to a
+    styled plain run instead of crashing the whole document."""
+    url = (url or "").strip()
+    if not url:
+        _add_link_styled_run(paragraph, text)
+        return
+    try:
+        r_id = paragraph.part.relate_to(
+            url,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+            is_external=True,
+        )
+    except Exception:
+        _add_link_styled_run(paragraph, text)
+        return
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("r:id"), r_id)
     r = OxmlElement("w:r")
@@ -124,6 +151,8 @@ def _profile_url(raw: str, domain: str, handle_prefix: str) -> str:
     domain path, or just a username/handle. The displayed text stays exactly
     as the user wrote it — this only affects where the hyperlink points."""
     raw = raw.strip()
+    if not raw:
+        return ""  # nothing to link — caller renders the label as plain text
     low = raw.lower()
     if low.startswith(("http://", "https://", "www.")) or domain in low:
         return _ensure_scheme(raw)
@@ -136,29 +165,40 @@ def _add_contact(doc, contact: dict):
     _set_spacing(p, before=0, after=2)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    def _clean(key):
+        return (contact.get(key) or "").strip()
+
     segments = []
-    if contact.get("phone"):
-        segments.append(("plain", contact["phone"], None))
-    if contact.get("email"):
-        email = contact["email"].strip()
+    phone = _clean("phone")
+    if phone:
+        segments.append(("plain", phone, None))
+    email = _clean("email")
+    if email:
+        addr = email[len("mailto:"):] if email.lower().startswith("mailto:") else email
         href = email if email.lower().startswith("mailto:") else f"mailto:{email}"
-        display = email[len("mailto:"):] if email.lower().startswith("mailto:") else email
-        segments.append(("link", display, href))
-    if contact.get("linkedin"):
-        raw = contact["linkedin"].strip()
-        segments.append(("link", "LinkedIn", _profile_url(raw, "linkedin.com", "www.linkedin.com/in/")))
-    if contact.get("github"):
-        raw = contact["github"].strip()
-        segments.append(("link", "GitHub", _profile_url(raw, "github.com", "github.com/")))
+        segments.append(("link", _clean("email_label") or addr, href))
+    # LinkedIn / GitHub each have a display label (default "LinkedIn"/"GitHub")
+    # separate from the link target, so the user can edit text and URL apart.
+    linkedin, linkedin_label = _clean("linkedin"), _clean("linkedin_label")
+    if linkedin or linkedin_label:
+        url = _profile_url(linkedin, "linkedin.com", "www.linkedin.com/in/") if linkedin else ""
+        segments.append(("link", linkedin_label or "LinkedIn", url))
+    github, github_label = _clean("github"), _clean("github_label")
+    if github or github_label:
+        url = _profile_url(github, "github.com", "github.com/") if github else ""
+        segments.append(("link", github_label or "GitHub", url))
     for link in contact.get("links") or []:
         url = (link.get("url") or "").strip()
-        if not url:
-            continue
-        label = (link.get("label") or "").strip() or url
-        segments.append(("link", label, _ensure_scheme(url)))
-    if contact.get("location"):
-        segments.append(("plain", contact["location"], None))
+        label = (link.get("label") or "").strip()
+        if not url and not label:
+            continue  # an empty link row carries nothing — skip it
+        segments.append(("link", label or url, _ensure_scheme(url) if url else ""))
+    location = _clean("location")
+    if location:
+        segments.append(("plain", location, None))
 
+    # Every segment now has non-empty display text, so the "  |  " separator can
+    # never dangle on an empty field.
     for i, (kind, text, url) in enumerate(segments):
         if i > 0:
             _add_plain_run(p, "  |  ")
@@ -222,7 +262,9 @@ def _add_job_header(doc, title: str, company: str, location: str, start: str, en
 
 
 def _add_bullet(doc, text: str):
-    text = _LEADING_BULLET_RE.sub("", text, count=1)
+    text = _LEADING_BULLET_RE.sub("", (text or ""), count=1)
+    if not text.strip():
+        return  # skip an empty/whitespace-only bullet — no data to render
     p = doc.add_paragraph(style="List Bullet")
     _set_spacing(p, before=0, after=1)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -310,27 +352,12 @@ def _add_additional_sections(doc, sections: list):
                 _add_bullet(doc, item)
 
 
-def format_compact(data: dict, output_path: str):
-    doc = Document()
-    _set_margins(doc)
+# ─────────────────────────── per-section renderers ──────────────────────────
+# Each renderer is self-contained (no shared state) so sections can be emitted
+# in any order. Name/headline/contact/summary stay pinned at the top; everything
+# below the summary is reorderable via `section_order`.
 
-    # Remove default paragraph spacing globally
-    style = doc.styles["Normal"]
-    style.font.name = FONT_NAME
-    style.font.size = BODY_SIZE
-
-    # Name
-    _add_name(doc, data.get("name", ""))
-
-    # Headline (professional title line under the name)
-    if data.get("headline"):
-        _add_headline(doc, data["headline"])
-
-    # Contact
-    if data.get("contact"):
-        _add_contact(doc, data["contact"])
-
-    # Summary
+def _render_summary(doc, data):
     if data.get("summary"):
         _add_section_header(doc, "Professional Summary")
         p = doc.add_paragraph()
@@ -340,12 +367,14 @@ def format_compact(data: dict, output_path: str):
         run.font.name = FONT_NAME
         run.font.size = BODY_SIZE
 
-    # Skills
+
+def _render_skills(doc, data):
     if data.get("skills"):
         _add_section_header(doc, "Technical Skills")
         _add_skills(doc, data["skills"])
 
-    # Experience
+
+def _render_experience(doc, data):
     if data.get("experience"):
         _add_section_header(doc, "Professional Experience")
         for job in data["experience"]:
@@ -360,7 +389,8 @@ def format_compact(data: dict, output_path: str):
             for bullet in job.get("bullets", []):
                 _add_bullet(doc, bullet)
 
-    # Projects
+
+def _render_projects(doc, data):
     if data.get("projects"):
         _add_section_header(doc, "Projects")
         for project in data["projects"]:
@@ -378,7 +408,8 @@ def format_compact(data: dict, output_path: str):
             for bullet in project.get("bullets", []):
                 _add_bullet(doc, bullet)
 
-    # Certifications
+
+def _render_certifications(doc, data):
     if data.get("certifications"):
         _add_section_header(doc, "Certifications")
         for cert in data["certifications"]:
@@ -409,11 +440,8 @@ def format_compact(data: dict, output_path: str):
             for bullet in cert.get("bullets", []):
                 _add_bullet(doc, bullet)
 
-    # Additional / non-standard sections (Awards, Languages, Publications, etc.)
-    if data.get("additional_sections"):
-        _add_additional_sections(doc, data["additional_sections"])
 
-    # Education — always rendered LAST.
+def _render_education(doc, data):
     if data.get("education"):
         _add_section_header(doc, "Education")
         for edu in data["education"]:
@@ -442,9 +470,11 @@ def format_compact(data: dict, output_path: str):
                 run_date.font.name = FONT_NAME
                 run_date.font.size = BODY_SIZE
 
-            inst_text = edu.get("institution", "")
-            if edu.get("location"):
-                inst_text = f"{inst_text}  |  {edu['location']}" if inst_text else edu["location"]
+            # Keep BOTH institution and location even when one is missing — never
+            # drop a field, and never leave a dangling "  |  ".
+            inst_text = "  |  ".join(
+                s for s in ((edu.get("institution") or "").strip(), (edu.get("location") or "").strip()) if s
+            )
             p2 = doc.add_paragraph()
             _set_spacing(p2, before=0, after=1)
             run_inst = p2.add_run(inst_text)
@@ -463,5 +493,87 @@ def format_compact(data: dict, output_path: str):
             for detail in edu.get("details") or []:
                 _add_bullet(doc, detail)
 
+
+def _render_additional_one(doc, data, index):
+    sections = data.get("additional_sections") or []
+    if 0 <= index < len(sections):
+        _add_additional_sections(doc, [sections[index]])
+
+
+_BODY_RENDERERS = {
+    "skills": _render_skills,
+    "experience": _render_experience,
+    "projects": _render_projects,
+    "certifications": _render_certifications,
+    "education": _render_education,
+}
+
+
+def _default_body_order(n_additional: int) -> list:
+    """Skills → Experience → Projects → Certifications → (additional) → Education."""
+    additional = [f"additional-{i}" for i in range(n_additional)]
+    return ["skills", "experience", "projects", "certifications", *additional, "education"]
+
+
+def _resolve_section_order(data: dict) -> list:
+    """The reorderable body order (everything after the summary). Honours a
+    user-supplied ``section_order`` but always appends any present section the
+    request omitted, so a section can never be silently dropped."""
+    n_additional = len(data.get("additional_sections") or [])
+    default = _default_body_order(n_additional)
+    requested = data.get("section_order")
+    if not (requested and isinstance(requested, list)):
+        return default
+    known = set(default)
+    ordered = [k for k in requested if k in known]
+    seen = set(ordered)
+    for k in default:
+        if k not in seen:
+            ordered.append(k)
+    return ordered
+
+
+def _safe(label, fn, *args):
+    """Run a render step but never let one bad field/section abort the document."""
+    try:
+        fn(*args)
+    except Exception:
+        logger.exception("[compact_ats] failed rendering %s", label)
+
+
+def _render_body_section(doc, data, key):
+    if key.startswith("additional-"):
+        try:
+            _render_additional_one(doc, data, int(key.split("-", 1)[1]))
+        except Exception:
+            logger.exception("[compact_ats] failed to render section '%s'", key)
+        return
+    renderer = _BODY_RENDERERS.get(key)
+    if renderer:
+        _safe(f"section '{key}'", renderer, doc, data)
+
+
+def format_compact(data: dict, output_path: str):
+    doc = Document()
+    _set_margins(doc)
+
+    # Remove default paragraph spacing globally
+    style = doc.styles["Normal"]
+    style.font.name = FONT_NAME
+    style.font.size = BODY_SIZE
+
+    # Pinned header: name, headline, contact, summary. Each is isolated so a
+    # single malformed field can never abort the whole document.
+    _safe("name", _add_name, doc, data.get("name", ""))
+    if data.get("headline"):
+        _safe("headline", _add_headline, doc, data["headline"])
+    if data.get("contact"):
+        _safe("contact", _add_contact, doc, data["contact"])
+    _safe("summary", _render_summary, doc, data)
+
+    # Reorderable body (everything after the summary).
+    for key in _resolve_section_order(data):
+        _render_body_section(doc, data, key)
+
     doc.save(output_path)
-    print(f"Saved: {output_path}")
+    logger.info("[compact_ats] saved %s", output_path)

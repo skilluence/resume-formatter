@@ -1,8 +1,8 @@
 "use client";
 
-import { CSSProperties } from "react";
+import { CSSProperties, useRef, useLayoutEffect } from "react";
 import { tk } from "@/lib/tokens";
-import type { Resume, SectionStatus } from "@/lib/resume";
+import { isCoursework, type Resume, type SectionStatus } from "@/lib/resume";
 
 /* A control card in the left rail: Keep / Skip / Edit for one section, a GPA
    on/off switch on Education, and — when Edit is on — that section's fields
@@ -15,12 +15,14 @@ interface Props {
   editing: boolean;
   isEducation?: boolean;
   showGpa?: boolean;
+  showCoursework?: boolean;
   resume: Resume;
   onChange: (r: Resume) => void;
   onKeep: () => void;
   onSkip: () => void;
   onToggleEdit: () => void;
   onToggleGpa?: () => void;
+  onToggleCoursework?: () => void;
 }
 
 export default function SectionCard(p: Props) {
@@ -74,6 +76,20 @@ export default function SectionCard(p: Props) {
         </button>
       )}
 
+      {p.isEducation && (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={!!p.showCoursework}
+          aria-label="Show or hide relevant coursework on the resume"
+          onClick={p.onToggleCoursework}
+          style={{ marginTop: "7px", width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: tk.surfaceSecondary, border: `1px solid ${tk.borderTertiary}`, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontFamily: tk.sans, fontSize: "12.5px", color: tk.onSurfaceSecondary }}
+        >
+          <span>Show Relevant Coursework</span>
+          <Switch on={!!p.showCoursework} />
+        </button>
+      )}
+
       {p.editing && (
         <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: `1px dashed ${tk.borderSecondary}` }}>
           <SectionEditor id={p.id} resume={p.resume} onChange={p.onChange} />
@@ -111,16 +127,45 @@ export function SectionEditor({ id, resume, onChange }: { id: string; resume: Re
     return (
       <>
         <Field label="Name" value={resume.name} onChange={(v) => edit((r) => (r.name = v))} />
+        {!resume.name.trim() && (
+          <p role="alert" style={{ fontFamily: tk.sans, fontSize: "11px", color: tk.red, margin: "-2px 0 6px" }}>
+            A name is required to download the resume.
+          </p>
+        )}
         <Field label="Headline" value={resume.headline || ""} onChange={(v) => edit((r) => (r.headline = v || null))} />
-        <Row>
-          <Field label="Phone" value={resume.contact.phone || ""} onChange={(v) => edit((r) => (r.contact.phone = v || null))} />
-          <Field label="Email" value={resume.contact.email || ""} onChange={(v) => edit((r) => (r.contact.email = v || null))} />
-        </Row>
-        <Row>
-          <Field label="LinkedIn" value={resume.contact.linkedin || ""} onChange={(v) => edit((r) => (r.contact.linkedin = v || null))} />
-          <Field label="GitHub" value={resume.contact.github || ""} onChange={(v) => edit((r) => (r.contact.github = v || null))} />
-        </Row>
+        <Field label="Phone" value={resume.contact.phone || ""} onChange={(v) => edit((r) => (r.contact.phone = v || null))} />
+        <NamedLink
+          name="Email"
+          textValue={resume.contact.email_label || ""}
+          textPlaceholder={resume.contact.email || "you@email.com"}
+          linkValue={resume.contact.email || ""}
+          linkLabel="Email address"
+          linkPlaceholder="you@email.com"
+          onText={(v) => edit((r) => (r.contact.email_label = v || null))}
+          onLink={(v) => edit((r) => (r.contact.email = v || null))}
+        />
+        <NamedLink
+          name="LinkedIn"
+          textValue={resume.contact.linkedin_label || ""}
+          textPlaceholder="LinkedIn"
+          linkValue={resume.contact.linkedin || ""}
+          linkLabel="Link (URL)"
+          linkPlaceholder="https://linkedin.com/in/…"
+          onText={(v) => edit((r) => (r.contact.linkedin_label = v || null))}
+          onLink={(v) => edit((r) => (r.contact.linkedin = v || null))}
+        />
+        <NamedLink
+          name="GitHub"
+          textValue={resume.contact.github_label || ""}
+          textPlaceholder="GitHub"
+          linkValue={resume.contact.github || ""}
+          linkLabel="Link (URL)"
+          linkPlaceholder="https://github.com/…"
+          onText={(v) => edit((r) => (r.contact.github_label = v || null))}
+          onLink={(v) => edit((r) => (r.contact.github = v || null))}
+        />
         <Field label="Location" value={resume.contact.location || ""} onChange={(v) => edit((r) => (r.contact.location = v || null))} />
+        <LinksEditor resume={resume} edit={edit} />
       </>
     );
   }
@@ -189,10 +234,36 @@ export function SectionEditor({ id, resume, onChange }: { id: string; resume: Re
             <Field label="Institution" value={e.institution} onChange={(v) => edit((r) => (r.education[i].institution = v))} />
             <Row>
               <Field label="Date" value={e.graduation_date || ""} onChange={(v) => edit((r) => (r.education[i].graduation_date = v || null))} />
-              <Field label="GPA" value={e.gpa || ""} onChange={(v) => edit((r) => (r.education[i].gpa = v || null))} />
+              <PrefixField
+                label="GPA"
+                prefix="GPA:"
+                placeholder="4.0"
+                value={(e.gpa || "").replace(/^\s*(c?gpa|grade)\s*:?\s*/i, "")}
+                onChange={(v) => edit((r) => (r.education[i].gpa = v.trim() ? `GPA: ${v.trim()}` : null))}
+              />
             </Row>
             <Field label="Location" value={e.location || ""} onChange={(v) => edit((r) => (r.education[i].location = v || null))} />
-            <List items={e.details} placeholder="Coursework / honor" onChange={(d) => edit((r) => (r.education[i].details = d))} />
+            <PrefixField
+              label="Relevant Coursework"
+              prefix="Relevant Coursework:"
+              placeholder="Python, SQL, Machine Learning…"
+              value={(e.details.find(isCoursework) || "").replace(/^\s*(relevant\s+)?coursework\s*:?\s*/i, "")}
+              onChange={(v) => edit((r) => {
+                const d = r.education[i].details;
+                const ci = d.findIndex(isCoursework);
+                const nv = v.trim() ? `Relevant Coursework: ${v.trim()}` : null;
+                if (ci >= 0) { if (nv) d[ci] = nv; else d.splice(ci, 1); }
+                else if (nv) d.push(nv);
+              })}
+            />
+            <List
+              items={e.details.filter((d) => !isCoursework(d))}
+              placeholder="Honor / detail"
+              onChange={(items) => edit((r) => {
+                const course = r.education[i].details.filter(isCoursework);
+                r.education[i].details = [...items, ...course];
+              })}
+            />
           </Entry>
         ))}
         <Add onClick={() => edit((r) => r.education.push({ degree: "", institution: "", location: null, graduation_date: null, gpa: null, details: [] }))}>+ Add education</Add>
@@ -218,16 +289,68 @@ export function SectionEditor({ id, resume, onChange }: { id: string; resume: Re
 }
 
 /* ── inputs ─────────────────────────────────────────────────────────────── */
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <label style={{ display: "block", flex: 1, marginBottom: "6px" }}>
       <span style={{ fontFamily: tk.sans, fontSize: "10px", color: tk.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
-      <input value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle} />
+      <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={inputStyle} />
     </label>
   );
 }
+
+/* A field with a fixed, non-editable prefix (e.g. "GPA:" or "Relevant Coursework:")
+   shown before the editable value. */
+function PrefixField({ label, prefix, value, placeholder, onChange }: { label: string; prefix: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+  return (
+    <label style={{ display: "block", flex: 1, marginBottom: "6px" }}>
+      <span style={{ fontFamily: tk.sans, fontSize: "10px", color: tk.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${tk.borderSecondary}`, borderRadius: "7px", background: "#fff" }}>
+        <span style={{ fontFamily: tk.sans, fontSize: "13px", fontWeight: 600, color: tk.onSurfaceTertiary, padding: "6px 0 6px 9px", whiteSpace: "nowrap" }}>{prefix}&nbsp;</span>
+        <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={{ flex: 1, minWidth: 0, fontFamily: tk.sans, fontSize: "13px", padding: "6px 9px 6px 2px", border: "none", outline: "none", background: "transparent", color: tk.onSurface }} />
+      </div>
+    </label>
+  );
+}
+
+/* A named contact link (Email / LinkedIn / GitHub) with the display text and the
+   real hyperlink as two separate, editable fields. */
+function NamedLink({ name, textValue, textPlaceholder, linkValue, linkLabel, linkPlaceholder, onText, onLink }: {
+  name: string; textValue: string; textPlaceholder: string; linkValue: string;
+  linkLabel: string; linkPlaceholder: string; onText: (v: string) => void; onLink: (v: string) => void;
+}) {
+  return (
+    <div style={{ marginBottom: "4px" }}>
+      <span style={{ fontFamily: tk.sans, fontSize: "10px", fontWeight: 600, color: tk.onSurfaceSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>{name}</span>
+      <Row>
+        <Field label="Text to display" value={textValue} placeholder={textPlaceholder} onChange={onText} />
+        <Field label={linkLabel} value={linkValue} placeholder={linkPlaceholder} onChange={onLink} />
+      </Row>
+    </div>
+  );
+}
+/* A textarea that grows to fit its content (so long bullets/summaries are fully
+   visible while editing), with a generous minimum height. Still drag-resizable. */
+function AutoTextarea({ value, onChange, placeholder, minHeight = 64 }: { value: string; onChange: (v: string) => void; placeholder?: string; minHeight?: number }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(minHeight, el.scrollHeight + 2)}px`;
+  }, [value, minHeight]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ ...inputStyle, lineHeight: 1.55, resize: "vertical", overflow: "hidden", minHeight: `${minHeight}px` }}
+    />
+  );
+}
+
 function Area({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} style={{ ...inputStyle, lineHeight: 1.5, resize: "vertical" }} />;
+  return <AutoTextarea value={value} onChange={onChange} minHeight={140} />;
 }
 function Row({ children }: { children: React.ReactNode }) {
   return <div style={{ display: "flex", gap: "8px" }}>{children}</div>;
@@ -247,10 +370,10 @@ function List({ items, onChange, placeholder }: { items: string[]; onChange: (i:
   return (
     <div>
       {items.map((it, i) => (
-        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "5px", alignItems: "flex-start" }}>
-          <span style={{ color: tk.onSurfaceGhost, paddingTop: "8px" }}>•</span>
-          <textarea value={it} onChange={(e) => set(i, e.target.value)} rows={1} placeholder={placeholder} style={{ ...inputStyle, lineHeight: 1.5, resize: "vertical" }} />
-          <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} aria-label="Remove item" style={{ flexShrink: 0, width: "26px", height: "26px", borderRadius: "6px", border: `1px solid ${tk.borderSecondary}`, background: "#fff", color: tk.red, cursor: "pointer", fontSize: "15px", lineHeight: 1 }}>
+        <div key={i} style={{ display: "flex", gap: "6px", marginBottom: "6px", alignItems: "flex-start" }}>
+          <span style={{ color: tk.onSurfaceGhost, paddingTop: "10px" }}>•</span>
+          <AutoTextarea value={it} onChange={(v) => set(i, v)} placeholder={placeholder} minHeight={56} />
+          <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} aria-label="Remove item" style={{ flexShrink: 0, width: "26px", height: "30px", borderRadius: "6px", border: `1px solid ${tk.borderSecondary}`, background: "#fff", color: tk.red, cursor: "pointer", fontSize: "15px", lineHeight: 1 }}>
             ×
           </button>
         </div>
@@ -259,6 +382,49 @@ function List({ items, onChange, placeholder }: { items: string[]; onChange: (i:
     </div>
   );
 }
+/* Add / edit / remove the extra contact links (website, portfolio, Twitter, …).
+   Each link has display text + a URL — exactly what Word shows. The named
+   LinkedIn/GitHub/Email fields above stay separate; this is for everything else. */
+function LinksEditor({ resume, edit }: { resume: Resume; edit: (m: (r: Resume) => void) => void }) {
+  const links = resume.contact.links || [];
+  return (
+    <div style={{ marginTop: "4px" }}>
+      <span style={{ fontFamily: tk.sans, fontSize: "10px", color: tk.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        Other links (website, portfolio…)
+      </span>
+      {links.map((lnk, i) => (
+        <div key={i} style={{ display: "flex", gap: "6px", marginTop: "5px", alignItems: "flex-start" }}>
+          <input
+            value={lnk.label}
+            placeholder="Display text"
+            aria-label={`Link ${i + 1} display text`}
+            onChange={(e) => edit((r) => (r.contact.links[i].label = e.target.value))}
+            style={{ ...inputStyle, flex: "0 0 38%" }}
+          />
+          <input
+            value={lnk.url}
+            placeholder="https://…"
+            aria-label={`Link ${i + 1} URL`}
+            onChange={(e) => edit((r) => (r.contact.links[i].url = e.target.value))}
+            style={inputStyle}
+          />
+          <button
+            type="button"
+            onClick={() => edit((r) => r.contact.links.splice(i, 1))}
+            aria-label="Remove link"
+            style={{ flexShrink: 0, width: "26px", height: "30px", borderRadius: "6px", border: `1px solid ${tk.borderSecondary}`, background: "#fff", color: tk.red, cursor: "pointer", fontSize: "15px", lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <div style={{ marginTop: "6px" }}>
+        <Add onClick={() => edit((r) => (r.contact.links = [...(r.contact.links || []), { label: "", url: "" }]))}>+ Add link</Add>
+      </div>
+    </div>
+  );
+}
+
 function SkillsEditor({ resume, edit }: { resume: Resume; edit: (m: (r: Resume) => void) => void }) {
   const entries = Object.entries(resume.skills);
   const rename = (oldKey: string, newKey: string) =>

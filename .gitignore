@@ -28,4 +28,5 @@ backend/package-lock.json
 # OS
 .DS_Store
 Thumbs.db
-demoResume
+DemoResumes
+.kombai

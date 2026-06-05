@@ -36,7 +36,9 @@ _BULLET_RE = re.compile(r"^\s*([•·‣◦▪●∙○■◆➢➤»*]|[-
 
 # --- dates -------------------------------------------------------------------
 _MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
-_DATE_TOKEN = rf"(?:{_MONTH}\s+)?\d{{4}}"
+# `\s*` (not `\s+`) so a missing-space OCR date like "Jan2021" still parses as
+# month+year instead of stranding "Jan" on the company name.
+_DATE_TOKEN = rf"(?:{_MONTH}\s*)?\d{{4}}"
 _DATE_RANGE_RE = re.compile(
     rf"(?P<start>{_DATE_TOKEN})\s*[–—\-]\s*(?P<end>Present|Current|Ongoing|{_DATE_TOKEN})",
     re.IGNORECASE,
@@ -66,7 +68,7 @@ _SECTION_SYNONYMS = {
         "relevant experience", "career experience",
     ],
     "projects": [
-        "projects", "personal projects", "key projects", "academic projects",
+        "projects", "project", "personal projects", "key projects", "academic projects",
         "selected projects", "project experience", "notable projects",
     ],
     "education": [
@@ -74,9 +76,9 @@ _SECTION_SYNONYMS = {
         "educational background", "education & training",
     ],
     "certifications": [
-        "certifications", "certification", "licenses", "licenses & certifications",
-        "licenses and certifications", "courses", "certifications & licenses",
-        "certifications and licenses",
+        "certifications", "certification", "certificate", "certificates", "licenses",
+        "licenses & certifications", "licenses and certifications", "courses",
+        "certifications & licenses", "certifications and licenses",
     ],
 }
 # Flatten to phrase -> type for O(1) exact lookup.
@@ -107,6 +109,35 @@ def _is_bullet(line: str) -> bool:
 
 def _strip_bullet(line: str) -> str:
     return _BULLET_RE.sub("", line, count=1).strip()
+
+
+# Stray control / zero-width / private-use / replacement glyphs (the boxes a PDF
+# can leave at line ends) carry no text and only look broken; we drop them.
+_BULLET_ORDS = set(range(0xe000, 0xf900)) | {
+    0x2022, 0x00b7, 0x2023, 0x25e6, 0x25aa, 0x25cf, 0x2219, 0x25cb, 0x25a0, 0x25c6,
+    0x27a2, 0x27a4, 0x00bb, 0x2043, 0x2024, 0x2027, 0x2d, 0x2a,
+}
+
+
+def _sanitize(s: str) -> str:
+    def keep(c):
+        o = ord(c)
+        return not (
+            (o < 32 and c != chr(9))
+            or 127 <= o <= 159
+            or 0x200b <= o <= 0x200f
+            or o in (0x2028, 0x2029, 0x2060, 0xfeff)
+            or 0xe000 <= o <= 0xf8ff
+            or 0xfff9 <= o <= 0xffff
+        )
+    return "".join(c for c in s if keep(c))
+
+
+def _is_lone_bullet(s: str) -> bool:
+    """A line that is only a bullet glyph (the marker extracted onto its own line,
+    with the real text on the following line)."""
+    s = s.strip()
+    return bool(s) and not re.search(r"[0-9A-Za-z]", s) and any(ord(c) in _BULLET_ORDS for c in s)
 
 
 def _starts_lower(line: str) -> bool:
@@ -169,8 +200,30 @@ def _extract_date_range(text: str):
 
 # ─────────────────────────── section parsers ────────────────────────────────
 
+def _line_has_contact(line: str) -> bool:
+    """True if a line carries contact info (email, phone, or a linkedin/github
+    mention). Used to locate where the header zone ends and to keep an ALL-CAPS
+    job title that sits *above* the contact line inside the header."""
+    low = line.lower()
+    return bool(
+        _EMAIL_RE.search(line)
+        or (_PHONE_RE.search(line) and sum(c.isdigit() for c in line) >= 7)
+        or "linkedin" in low
+        or "github" in low
+    )
+
+
+def _is_urlish(s: str) -> bool:
+    """True when a segment looks like an actual URL/handle (has a scheme, www,
+    a domain, or a path) rather than just the platform word like 'LinkedIn'."""
+    return bool(re.search(r"https?://|www\.|[\w-]+\.(?:com|io|me|dev|net|org|co)\b|/", s.lower()))
+
+
 def _parse_contact(contact_line: str, embedded: list) -> dict:
-    contact = {"phone": None, "email": None, "linkedin": None, "github": None, "location": None, "links": []}
+    contact = {"phone": None, "email": None, "email_label": None,
+               "linkedin": None, "linkedin_label": None,
+               "github": None, "github_label": None,
+               "location": None, "links": []}
 
     for seg in _split_pipes(contact_line):
         low = seg.lower()
@@ -179,9 +232,17 @@ def _parse_contact(contact_line: str, embedded: list) -> dict:
         elif _PHONE_RE.search(seg) and sum(c.isdigit() for c in seg) >= 7:
             contact["phone"] = seg
         elif "linkedin" in low:
-            contact["linkedin"] = contact["linkedin"] or seg
+            # A real URL goes to the link field; the bare word 'LinkedIn' is just
+            # the display label (so we never build a bogus linkedin.com/in/LinkedIn).
+            if _is_urlish(seg):
+                contact["linkedin"] = contact["linkedin"] or seg
+            else:
+                contact["linkedin_label"] = contact["linkedin_label"] or seg
         elif "github" in low:
-            contact["github"] = contact["github"] or seg
+            if _is_urlish(seg):
+                contact["github"] = contact["github"] or seg
+            else:
+                contact["github_label"] = contact["github_label"] or seg
         elif contact["location"] is None:
             contact["location"] = seg
         else:
@@ -192,7 +253,12 @@ def _parse_contact(contact_line: str, embedded: list) -> dict:
     for url in embedded:
         low = url.lower()
         if low.startswith("mailto:"):
-            contact["email"] = url[len("mailto:"):]
+            # Prefer the visible email text; only fall back to an embedded mailto
+            # when none was written in the contact line. Embedded mailto targets
+            # are sometimes placeholders/redactions (e.g. "xx.212@…") that differ
+            # from the real, visible address.
+            if not contact["email"]:
+                contact["email"] = url[len("mailto:"):]
         elif "linkedin.com" in low:
             contact["linkedin"] = url
         elif "github.com" in low:
@@ -416,56 +482,286 @@ def _parse_projects(body: list) -> list:
     return projects
 
 
+# --- education classification -----------------------------------------------
+# Degree keywords. The 2-letter abbreviations REQUIRE a dot (b.s, m.a, …) so a
+# state code or month ("Boston, MA", "MS", "March") is never read as a degree.
+_DEGREE_RE = re.compile(
+    r"\b(bachelors?|masters?|associate|diploma|doctorate|doctoral|undergraduate|postgraduate|"
+    r"mba|m\.b\.a|ph\.?\s?d|bca|mca|"
+    r"b\.?\s?tech|m\.?\s?tech|b\.?arch|b\.?\s?sc|m\.?\s?sc|"
+    r"b\.s\.?|m\.s\.?|b\.a\.?|m\.a\.?|b\.e\.?|m\.e\.?)\b", re.IGNORECASE)
+_INSTITUTION_RE = re.compile(
+    r"\b(university|college|institute|institution|school|academy|polytechnic|universidad|iit|nit|iiit)\b",
+    re.IGNORECASE)
+# Secondary-school levels (common on Indian resumes) — treated like a degree so
+# each opens its own education entry: "Class XII (CBSE)", "Intermediate", "SSC".
+_SCHOOL_LEVEL_RE = re.compile(
+    r"\b(class\s+(?:x|xi|xii|10|11|12)|higher\s+secondary|intermediate|matriculation|hsc|ssc|1[02]th)\b",
+    re.IGNORECASE)
+# A single graduation date — a plausible year, optionally with a month and an
+# 'Expected/Present' qualifier. Restricted to 19xx/20xx so a course code like
+# "CS 5304" isn't mistaken for a year.
+_GRAD_YEAR = r"(?:19|20)\d{2}"
+_SINGLE_DATE_RE = re.compile(
+    rf"(?:expected|anticipated|graduating|graduated|present|current)?\s*(?:{_MONTH}\s*)?{_GRAD_YEAR}\b",
+    re.IGNORECASE)
+_EDU_DETAIL_RE = re.compile(
+    r"^\s*(relevant\s+)?(coursework|courses|honou?rs|awards?|minor|thesis|dissertation|"
+    r"activities|specialization|concentration|gpa|cgpa|grade|dean'?s\s+list|study\s+abroad)\b",
+    re.IGNORECASE)
+# A leading graduation-date label ("Expected", "Anticipated Graduation:",
+# "Graduated") — stripped off the remainder once the date itself is extracted, so
+# "Anticipated Graduation: Dec 2025" reduces to nothing (a pure date line) while
+# "Expected May 2026 | GPA: 3.6" still yields the GPA.
+_GRAD_LABEL_STRIP = re.compile(
+    r"^\s*(?:(?:expected|anticipated|graduating|graduated)\b\s*)?"
+    r"(?:(?:graduation|completion)\b\s*)?(?:date\b\s*)?[:\-]?\s*", re.IGNORECASE)
+# A faculty/major like "College of Engineering" / "Institute of Design" — anchored,
+# so a real school ("Birla Institute of Technology", proper noun first) is NOT
+# matched. Kept with the degree, never treated as the awarding institution.
+_FACULTY_RE = re.compile(r"^(college|institute|school|faculty|department)\s+of\b", re.IGNORECASE)
+# A strong in-line field separator.
+_SEP_RE = re.compile(r"[|\t]|\s[–—\-]\s")
+# A GPA / CGPA / percentage token anywhere in a string.
+_GPA_PHRASE_RE = re.compile(
+    r"(?:c?gpa|grade)\s*[:\-]?\s*\d(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?"
+    r"|\d(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?"
+    r"|\d{1,3}(?:\.\d+)?\s*%"
+    r"|\d(?:\.\d+)?\s*c?gpa", re.IGNORECASE)
+# Detail keywords for per-segment routing inside a pipe-delimited line.
+_COURSEWORK_RE = re.compile(
+    r"^(relevant\s+)?(coursework|courses|honou?rs|awards?|minor|thesis|dissertation|"
+    r"activities|specialization|concentration|dean'?s\s+list|study\s+abroad)\b", re.IGNORECASE)
+
+
+def _extract_any_date(text: str):
+    """Pull a graduation date out of an education line — a range, a single
+    'Mon YYYY'/'YYYY', or an 'Expected …'. Returns (grad_or_None, text_without_date).
+    Spaces are collapsed but tabs survive as field separators, and a ', ,' gap
+    left where an inline date was removed is tidied up."""
+    start, end, rest = _extract_date_range(text)
+    if start or end:
+        grad = end if not start else (f"{start} – {end}" if end else start)
+        return grad, rest
+    m = _SINGLE_DATE_RE.search(text)
+    if m and m.group(0).strip():
+        grad = re.sub(r"[^\S\t]+", " ", m.group(0).strip())
+        rest = re.sub(r"[^\S\t]+", " ", text[: m.start()] + " " + text[m.end():])
+        rest = re.sub(r"\s*,\s*,\s*", ", ", rest).strip(" \t|,–—-")
+        return grad, rest
+    return None, text
+
+
+def _edu_role(text: str) -> str:
+    """Classify an education header line by what it carries."""
+    has_deg = bool(_DEGREE_RE.search(text))
+    has_inst = bool(_INSTITUTION_RE.search(text))
+    if has_deg and has_inst:
+        return "both"
+    if has_deg:
+        return "degree"
+    if has_inst:
+        return "institution"
+    return "unknown"
+
+
+def _split_on_separator(text: str) -> list:
+    """Split a line on the strongest separator present (pipe, tab, or a spaced
+    dash). Returns a single-element list when there's no separator."""
+    if "|" in text:
+        return [p.strip() for p in text.split("|") if p.strip()]
+    if "\t" in text:
+        return [p.strip() for p in text.split("\t") if p.strip()]
+    dparts = [p.strip() for p in re.split(r"\s+[–—\-]\s+", text) if p.strip()]
+    return dparts if len(dparts) >= 2 else [text.strip()]
+
+
+def _split_degree_institution(text: str):
+    """Split a combined 'Degree | Institution [| GPA | Location]' line. A
+    faculty/major phrase ('College of Engineering', 'Institute of Design') is kept
+    with the DEGREE, never treated as the school. Returns (degree, rest) where rest
+    is the institution segment plus any GPA/location for the caller to absorb."""
+    parts = _split_on_separator(text)
+    if len(parts) < 2:
+        return text, ""
+    deg = next((p for p in parts if _DEGREE_RE.search(p)), parts[0])
+    others = [p for p in parts if p is not deg]
+    faculty = [p for p in others if _FACULTY_RE.match(p)]
+    if faculty:
+        deg = "  -  ".join([deg] + faculty)
+    rest = [p for p in others if p not in faculty]
+    if not rest:
+        return deg, ""
+    inst = next((p for p in rest if _INSTITUTION_RE.search(p)), rest[0])
+    extras = [p for p in rest if p is not inst]
+    return deg, (inst + ("  |  " + "  |  ".join(extras) if extras else ""))
+
+
+def _absorb_meta(entry: dict, line: str) -> str:
+    """Peel GPA / location / coursework out of a (possibly pipe-delimited) trailing
+    education line into the entry. Returns the leftover institution-ish text."""
+    segs = _split_pipes(line) if "|" in line else [line]
+    leftover = []
+    for seg in segs:
+        seg = seg.strip()
+        if not seg:
+            continue
+        if _COURSEWORK_RE.match(seg):
+            entry["details"].append(seg)
+        elif entry["gpa"] is None and _GPA_PHRASE_RE.search(seg) and not _INSTITUTION_RE.search(seg):
+            entry["gpa"] = seg
+        elif entry["location"] is None and _looks_like_location(seg):
+            entry["location"] = seg
+        else:
+            leftover.append(seg)
+    return "  |  ".join(leftover)
+
+
+def _peel_degree_meta(entry: dict):
+    """Pull an inline GPA/percentage out of the degree text into the gpa field and
+    tidy any ', ,' / dangling commas left behind."""
+    deg = entry["degree"]
+    if entry["gpa"] is None:
+        m = _GPA_PHRASE_RE.search(deg)
+        if m:
+            entry["gpa"] = m.group(0).strip()
+            deg = deg[: m.start()] + " " + deg[m.end():]
+    deg = re.sub(r"\s*,\s*,\s*", ", ", re.sub(r"[^\S\t]+", " ", deg))
+    entry["degree"] = deg.strip(" ,")
+
+
 def _parse_education(body: list) -> list:
+    """Parse education across the layouts seen in real resumes:
+      * 'Degree   GradDate' then 'Institution'         (single dates, two lines)
+      * 'Degree' / 'GradDate' / 'Institution'          (date on its own line)
+      * 'Institution  GradDate' then 'Degree'          (institution-first)
+      * 'Degree | Institution  Date' (or ' - ')        (combined on one line)
+    Single graduation dates (not just ranges) become graduation_date, GPA and
+    location are pulled out, and every degree opens its own entry rather than
+    collapsing into bullets."""
     entries = []
     cur = None
+
+    def start_entry():
+        nonlocal cur
+        cur = {"degree": "", "institution": "", "location": None,
+               "graduation_date": None, "gpa": None, "details": []}
+        entries.append(cur)
+        return cur
+
     for line in body:
-        raw = _strip_bullet(line) if _is_bullet(line) else line
-        if _DATE_RANGE_RE.search(raw) and not _starts_lower(raw):
-            start, end, degree = _extract_date_range(raw)
-            grad = end if not start else (f"{start} – {end}" if end else start)
-            cur = {"degree": degree, "institution": "", "location": None,
-                   "graduation_date": grad, "gpa": None, "details": []}
-            entries.append(cur)
-        elif cur is None:
-            cur = {"degree": raw, "institution": "", "location": None,
-                   "graduation_date": None, "gpa": None, "details": []}
-            entries.append(cur)
-        elif _starts_lower(raw):
-            # wrapped continuation of the previous line
+        is_b = _is_bullet(line)
+        raw = (_strip_bullet(line) if is_b else line).strip()
+        if not raw or not re.search(r"[A-Za-z0-9]", raw):
+            continue  # blank or a lone separator like "|"
+
+        # 1. Detail lines (Coursework / Honors / Dean's List / Study Abroad / GPA /
+        #    glyph bullets) stay with the current entry, kept verbatim.
+        if cur is not None and (is_b or _EDU_DETAIL_RE.match(raw)):
+            _absorb_detail(cur, raw)
+            continue
+
+        grad, rest = _extract_any_date(raw)
+        rest = _GRAD_LABEL_STRIP.sub("", rest).strip(" :\t|,–—-")
+
+        # 2. A line that is ONLY a date (a bare year range, or a date + an
+        #    'Expected/Graduation' label) belongs to the current entry — handled
+        #    before the wrapped-continuation rule so a digit-leading date is never
+        #    glued onto the previous field.
+        if not rest:
+            if cur is None:
+                start_entry()
+            if grad and not cur["graduation_date"]:
+                cur["graduation_date"] = grad
+            continue
+
+        has_deg = bool(_DEGREE_RE.search(rest) or _SCHOOL_LEVEL_RE.search(rest))
+        has_inst = bool(_INSTITUTION_RE.search(rest))
+
+        # 3. A wrapped continuation: starts with a LOWERCASE letter (a digit-led
+        #    line is a date/grade, already handled) with no degree/inst/date signal.
+        if cur is not None and raw[:1].islower() and not has_deg and not has_inst and not grad:
             if cur["details"]:
                 cur["details"][-1] = (cur["details"][-1] + " " + raw).strip()
             elif cur["institution"]:
                 cur["institution"] = (cur["institution"] + " " + raw).strip()
-            else:
+            elif cur["degree"]:
                 cur["degree"] = (cur["degree"] + " " + raw).strip()
-        elif not cur["institution"]:
-            cur["institution"] = _absorb_education_line(cur, raw)
-        else:
-            _absorb_detail(cur, raw)
+            else:
+                cur["degree"] = raw
+            continue
+
+        # 4. Open a NEW entry on a real degree, an institution when the current
+        #    entry already has one, OR an unrecognised line that carries its OWN
+        #    date when the current entry already has a date (a degree whose keyword
+        #    we don't know — e.g. just "Computer Science  Aug 2018 - Aug 2022").
+        #    NEVER on an unknown trailing line without a fresh date — that prevents
+        #    phantom entries from locations / honours / GPA tails.
+        if cur is None:
+            start_entry()
+        elif has_deg and cur["degree"]:
+            start_entry()
+        elif has_inst and not has_deg and cur["institution"]:
+            start_entry()
+        elif (grad and cur["graduation_date"] and not has_deg and not has_inst
+              and not raw[:1].islower() and not _looks_like_location(rest)):
+            start_entry()
+
+        grad_stored = False
+        if grad and not cur["graduation_date"]:
+            cur["graduation_date"] = grad
+            grad_stored = True
+
+        # 5. Place the content.
+        if has_deg:
+            if _SEP_RE.search(rest):  # may also carry institution / GPA / location
+                deg, inst = _split_degree_institution(rest)
+                cur["degree"] = (cur["degree"] + " " + deg).strip() if cur["degree"] else deg
+                if inst:
+                    if "|" not in inst and not _INSTITUTION_RE.search(inst) and _looks_like_location(inst) and cur["location"] is None:
+                        cur["location"] = inst          # "DEGREE | USA" — a bare location, not the school
+                    elif cur["institution"]:
+                        _absorb_detail(cur, inst)
+                    else:
+                        cur["institution"] = _absorb_education_line(cur, inst)
+            else:
+                cur["degree"] = (cur["degree"] + " " + rest).strip() if cur["degree"] else rest
+            _peel_degree_meta(cur)
+        elif has_inst:
+            if cur["institution"]:
+                _absorb_detail(cur, rest)
+            else:
+                cur["institution"] = _absorb_education_line(cur, rest)
+        else:  # unknown remainder — route it, never fabricate a degree
+            if _looks_like_location(rest) and cur["location"] is None:
+                cur["location"] = rest
+            elif not cur["degree"]:
+                if _SEP_RE.search(rest):                # e.g. "COMPUTER SCIENCE ENG | IND"
+                    leftover = _absorb_meta(cur, rest)  # peels the trailing location/GPA
+                    cur["degree"] = re.sub(r"\s*\|\s*", " ", leftover).strip() or rest
+                else:
+                    cur["degree"] = rest
+            elif not cur["institution"]:
+                cur["institution"] = _absorb_education_line(cur, rest)
+            else:
+                # Keep the original line (with its date) if a fresh date couldn't
+                # be stored, so a graduation year is never silently dropped.
+                _absorb_detail(cur, raw if (grad and not grad_stored) else rest)
+
     return entries
 
 
 def _absorb_education_line(entry: dict, line: str) -> str:
-    """The institution line. Pull GPA and location out of it when present
-    ('Institution | GPA | Location' or 'Institution, City, ST'). Returns the
-    cleaned institution string."""
+    """The institution line — pull GPA / location / coursework out and return the
+    cleaned institution name ('Institution | GPA | Location' or
+    'Institution, City, ST')."""
     if "|" in line:
-        segs = _split_pipes(line)
-        institution_parts = []
-        for seg in segs:
-            if entry["gpa"] is None and _GPA_RE.search(seg):
-                entry["gpa"] = seg
-            elif re.match(r"^(relevant\s+)?(coursework|honou?rs|minor|thesis|activities|specialization|concentration)\b", seg, re.IGNORECASE):
-                entry["details"].append(seg)
-            elif entry["location"] is None and re.search(r",\s*[A-Za-z .]+$", seg) and seg is not segs[0]:
-                entry["location"] = seg
-            else:
-                institution_parts.append(seg)
-        if len(institution_parts) > 1:           # keep any extra segments as details
-            entry["details"].extend(institution_parts[1:])
-        return institution_parts[0] if institution_parts else (segs[0] if segs else "")
-    # No pipes (Word style). Try to peel a trailing 'City, ST' as location.
+        leftover = _absorb_meta(entry, line)
+        segs = [s.strip() for s in leftover.split("|") if s.strip()]
+        if len(segs) > 1:                         # keep any extra segments as details
+            entry["details"].extend(segs[1:])
+        return segs[0] if segs else ""
+    # No pipes (Word style). Try to peel a trailing 'City, ST' / 'City, Country'.
     m = re.search(r",\s*([A-Za-z .]+,\s*[A-Z]{2}|[A-Za-z .]+,\s*[A-Za-z ]+)$", line)
     if m:
         entry["location"] = m.group(1).strip()
@@ -474,11 +770,12 @@ def _absorb_education_line(entry: dict, line: str) -> str:
 
 
 def _absorb_detail(entry: dict, line: str):
-    """An extra education line: Coursework / Honors / a standalone GPA."""
-    if entry["gpa"] is None and re.match(r"^\s*(c?gpa|grade)\b", line, re.IGNORECASE):
-        entry["gpa"] = line.strip()
-        return
-    entry["details"].append(line.strip())
+    """A trailing education line (Coursework / Honors / a GPA / a stray location).
+    Peel GPA & location into their own fields; keep the rest as a detail — never a
+    separate degree."""
+    leftover = _absorb_meta(entry, line)
+    if leftover.strip():
+        entry["details"].append(leftover.strip())
 
 
 def _parse_certifications(body: list) -> list:
@@ -492,6 +789,8 @@ def _parse_certifications(body: list) -> list:
         else:
             raw = line
         segs = _split_pipes(raw) if "|" in raw else [raw]
+        if not segs:
+            continue  # a line that's only pipes/whitespace carries no cert
         cert = {"name": segs[0], "issuer": None, "date": None, "bullets": []}
         for seg in segs[1:]:
             if _DATE_RANGE_RE.search(seg) or re.search(r"\b\d{4}\b", seg):
@@ -579,7 +878,10 @@ def structure_resume(raw_text: str) -> dict:
     lossless, AI-free."""
     data = {
         "name": "", "headline": None,
-        "contact": {"phone": None, "email": None, "linkedin": None, "github": None, "location": None, "links": []},
+        "contact": {"phone": None, "email": None, "email_label": None,
+                    "linkedin": None, "linkedin_label": None,
+                    "github": None, "github_label": None,
+                    "location": None, "links": []},
         "summary": None, "skills": {}, "experience": [], "projects": [],
         "education": [], "certifications": [], "additional_sections": [],
     }
@@ -596,30 +898,95 @@ def structure_resume(raw_text: str) -> dict:
             in_links = True
             continue
         (embedded if in_links else lines).append(line.strip())
+
+    # A bullet glyph extracted onto its OWN line (a common PDF artifact) is merged
+    # with the text on the following line; leftover junk/box glyphs are stripped.
+    merged, k = [], 0
+    while k < len(lines):
+        if _is_lone_bullet(lines[k]):
+            if k + 1 < len(lines) and not _is_lone_bullet(lines[k + 1]):
+                merged.append("• " + lines[k + 1])
+                k += 2
+            else:
+                k += 1  # a stray lone bullet with no following text — drop it
+        else:
+            merged.append(lines[k])
+            k += 1
+    lines = [t for t in (_sanitize(l).strip() for l in merged) if t]
     if not lines:
         return data
 
     content_lines = list(lines)  # for the completeness guard
 
     # 2. Header block: name, then headline + contact, up to the first section.
-    data["name"] = lines[0]
+    #
+    # The header zone is everything between the name and the first real section.
+    # We must NOT end it at any ALL-CAPS line: a job title like "AI/ML ENGINEER"
+    # or "DATA SCIENTIST" sits right under the name and trips _looks_like_heading,
+    # which would strand the title + contact line in a body section (rendering it
+    # below Projects). So we extend the header zone to the first KNOWN section, and
+    # only let a *generic* ALL-CAPS heading end it when it isn't part of the
+    # name/title/contact cluster — decided by looking ahead for a contact line.
+    # Line 1 is the name. If it's "Name | Role" (a pipe-separated headline on the
+    # same line), split the role off into the headline instead of the name.
+    name_line = lines[0]
+    extra_headline = None
+    if "|" in name_line:
+        nparts = [p.strip() for p in name_line.split("|") if p.strip()]
+        data["name"] = nparts[0] if nparts else name_line
+        if len(nparts) > 1:
+            extra_headline = " ".join(nparts[1:]).strip()
+    else:
+        data["name"] = name_line
+
+    # Does a contact line appear in the top region before any known section?
+    has_top_contact = False
+    j = 1
+    while j < len(lines) and j < 8 and _heading_type(lines[j]) is None:
+        if _line_has_contact(lines[j]):
+            has_top_contact = True
+            break
+        j += 1
+
     idx = 1
     preamble = []
-    while idx < len(lines) and _heading_type(lines[idx]) is None and not _looks_like_heading(lines[idx]):
-        preamble.append(lines[idx])
+    while idx < len(lines):
+        line = lines[idx]
+        if _heading_type(line) is not None:
+            break  # a real, known section starts the body
+        if _looks_like_heading(line):
+            # Generic ALL-CAPS heading. Keep it in the header only while we're
+            # still above the contact line of a header that has one; otherwise it
+            # is a real section (e.g. "AWARDS" right under the name).
+            already_have_contact = any(_line_has_contact(p) for p in preamble)
+            if not (has_top_contact and not already_have_contact):
+                break
+        preamble.append(line)
         idx += 1
-    contact_line = None
+
+    # Split the header zone into contact line(s) and headline text. Gather ALL
+    # contact-bearing lines (contact may be split across lines) and drop a stray
+    # date-only line so it can't become the headline.
+    contact_lines = []
     headline_parts = []
     for p in preamble:
-        if _EMAIL_RE.search(p) or (_PHONE_RE.search(p) and sum(c.isdigit() for c in p) >= 7) \
-                or "linkedin" in p.lower() or "github" in p.lower():
-            contact_line = p if contact_line is None else contact_line
-            if contact_line is p:
-                continue
-        headline_parts.append(p)
-    if headline_parts:
-        data["headline"] = " ".join(headline_parts)
-    data["contact"] = _parse_contact(contact_line or "", embedded)
+        if _line_has_contact(p):
+            contact_lines.append(p)
+        elif _DATE_RANGE_RE.search(p) and len(p.split()) <= 4:
+            continue
+        else:
+            headline_parts.append(p)
+    headline_bits = ([extra_headline] if extra_headline else []) + headline_parts
+    if headline_bits:
+        joined = " ".join(headline_bits).strip()
+        # A short tagline is a headline; a long sentence is really the summary.
+        # Some resumes drop the summary right under the contact with no heading —
+        # keep it readable as the summary instead of a giant centered headline.
+        if len(joined.split()) > 16:
+            data["summary"] = joined
+        else:
+            data["headline"] = joined
+    data["contact"] = _parse_contact(" | ".join(contact_lines), embedded)
 
     # 3. Walk the remaining lines section by section.
     sections = []  # (type_or_heading, is_known, body[])
