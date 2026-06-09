@@ -47,6 +47,49 @@ def _docx_all_tokens(path):
 
 # ── unit: heading detection ──────────────────────────────────────────────────
 
+def test_allcaps_education_content_is_not_a_heading():
+    # An ALL-CAPS institution / degree / GPA line inside EDUCATION must NOT be read
+    # as a section heading — doing so splits the section and scatters the rows.
+    assert not S._looks_like_heading("UNIVERSITY OF NORTH TEXAS")
+    assert not S._looks_like_heading("VELLORE INSTUTITE OF TECHNOLOGY")  # typo + 'OF'
+    assert not S._looks_like_heading("CGPA: 8.5/10")
+    assert not S._looks_like_heading("CLASS XII 2020")
+    # genuine word-only headings still detected
+    assert S._looks_like_heading("ACHIEVEMENTS")
+    assert S._looks_like_heading("AWARDS")
+
+
+def test_education_allcaps_institutions_do_not_split_section():
+    # Real layout: degree line, then the school in ALL CAPS on its own line.
+    raw = (
+        "Karthik\nkarthik@example.com\n\n"
+        "EDUCATION\n"
+        "Master of Science in Computer and information science May 2025\n"
+        "UNIVERSITY OF NORTH TEXAS\n"
+        "Bachelors in Computer Science and Engineering May 2023\n"
+        "VELLORE INSTUTITE OF TECHNOLOGY\n"
+    )
+    data = S.structure_resume(raw)
+    assert len(data["education"]) == 2
+    assert data["education"][0]["institution"] == "UNIVERSITY OF NORTH TEXAS"
+    assert data["education"][1]["institution"] == "VELLORE INSTUTITE OF TECHNOLOGY"
+    # nothing leaked into a fabricated section
+    assert not data["additional_sections"]
+
+
+def test_education_degree_dash_major_keeps_one_entry():
+    # "Degree - Major" then the school: the major stays with the degree and the
+    # school (whose city must not eat the whole name) is the institution — one entry.
+    edus = S._parse_education([
+        "Master of Science - Computer Science Jan 2024 – Dec 2025",
+        "New Jersey Institute of Technology (NJIT) – Newark, NJ | GPA:3.35/4.0",
+    ])
+    assert len(edus) == 1
+    assert "Computer Science" in edus[0]["degree"]
+    assert "New Jersey Institute of Technology" in edus[0]["institution"]
+    assert "8.5" not in (edus[0]["gpa"] or "") and edus[0]["gpa"]  # GPA captured
+
+
 def test_known_and_keyword_headings():
     assert S._heading_type("PROFESSIONAL SUMMARY") == "summary"
     assert S._heading_type("Work EXPERIENCE") == "experience"

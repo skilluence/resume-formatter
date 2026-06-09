@@ -6,7 +6,9 @@ Guidance for AI agents working in this repository.
 
 **Resume Formatter** — turns a raw resume (PDF/DOCX upload or pasted text) into a clean, ATS-ready **DOCX** (and optional PDF) **without losing or inventing a word**. Flow: upload/paste → parse text → **rule-based** structurer builds JSON → user reviews/edits each section → render a styled DOCX → download.
 
-> **No AI, no API keys.** Earlier versions used GPT-4o-mini to structure resumes; that step was replaced with deterministic Python rules so the output can only ever contain words from the source. There is no OpenAI dependency, no network call, and no key to configure.
+> **The `/format` flow is No-AI, no key.** Earlier versions used GPT-4o-mini to structure resumes; that step was replaced with deterministic Python rules so the output can only ever contain words from the source. The core formatter has no network call and needs no key.
+>
+> **`/tailor` (beta) is a SEPARATE, opt-in AI feature.** It uses OpenAI to rewrite a resume for a job description and draft a cover letter + HR email. It is clearly labeled "AI-drafted", lives in its own page/endpoints, and **never touches the `/format` guarantee.** Even there, facts (name, contact, employers, titles, dates, education, certifications) are re-stamped from the source in `llm/tailor.py` so the model can only reword bullets/summary/skills/projects — it can never alter a fact, and unknown numbers come back as editable `[placeholders]`, never fabricated. Needs `OPENAI_API_KEY` in `backend/.env` (gitignored); optional `OPENAI_MODEL` (default `gpt-4o-mini`) and `FIRECRAWL_API_KEY` (better job-URL scraping).
 
 Monorepo:
 - `frontend/` — Next.js 14 (App Router, TypeScript, Tailwind v4). Deployed on **Vercel**.
@@ -44,6 +46,20 @@ Two phases: parse + structure first (no file written), then build after the user
 | `frontend/components/ResumePreview.tsx` | Live paginated A4 document (matches the DOCX) |
 | `frontend/components/SectionCard.tsx` | Per-section keep / skip / edit |
 | `frontend/lib/` | Resume types, design tokens, helpers |
+
+### AI Tailor (beta) — files
+
+| File | Responsibility |
+|------|----------------|
+| `backend/llm/client.py` | OpenAI client + model from env (`OPENAI_API_KEY`, `OPENAI_MODEL`) |
+| `backend/llm/prompts.py` | Prompt spec (6 exp bullets, 2 projects, ATS skills, 100-word summary, `**bold**`, `[placeholders]`, no em dashes) |
+| `backend/llm/tailor.py` | `tailor(resume, jd)` → drafts; **re-stamps facts from source** so the model can't alter them |
+| `backend/jd_scraper.py` | `fetch_jd(url)` — httpx+BeautifulSoup, Firecrawl if `FIRECRAWL_API_KEY` set; "" on failure (UI falls back to paste) |
+| `backend/formatters/letter.py` | Cover letter + HR email DOCX (letterhead, clickable email/LinkedIn, `**bold**`) |
+| `backend/main.py` | `POST /tailor`, `POST /tailor/build`, `GET /tailor/status` |
+| `frontend/app/tailor/page.tsx` · `components/TailorWorkspace.tsx` · `components/TailorReview.tsx` · `lib/tailor.ts` | `/tailor` page: input → editable 3-tab review → DOCX/PDF download |
+
+`compact_ats.py` gained `_add_rich_runs` for `**bold**` markup — a **no-op for `/format`** (rule output never contains `**`), so existing DOCX output is byte-identical.
 
 ## Gotchas
 

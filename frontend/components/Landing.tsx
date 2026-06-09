@@ -19,6 +19,7 @@ export default function Landing() {
         </Link>
         <nav style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "20px" }}>
           <a href="#how" style={navLink}>How it works</a>
+          <Link href="/tailor" style={navLink}>Tailor to a job <sup style={{ fontSize: "9px", color: tk.clay, fontWeight: 700 }}>BETA</sup></Link>
           <Link href="/format" style={ctaSmall}>Format a resume →</Link>
         </nav>
       </header>

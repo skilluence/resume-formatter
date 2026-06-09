@@ -320,7 +320,9 @@ function Header() {
         <Asterisk />
         <span style={{ fontFamily: tk.serif, fontSize: "17px", fontWeight: 500, color: tk.onSurface, letterSpacing: "-0.01em" }}>Resume Formatter</span>
       </Link>
-      <span style={{ marginLeft: "auto", fontFamily: tk.sans, fontSize: "12.5px", color: tk.onSurfaceTertiary }}>Reformat without losing a single word</span>
+      <Link href="/tailor" style={{ marginLeft: "auto", fontFamily: tk.sans, fontSize: "12.5px", color: tk.onSurfaceTertiary, textDecoration: "none" }}>
+        Tailor to a job <sup style={{ fontSize: "9px", color: tk.clay, fontWeight: 700 }}>BETA</sup>
+      </Link>
     </header>
   );
 }
@@ -452,7 +454,10 @@ function ReviewRail(p: RailProps) {
           </button>
         )}
         {!p.canDownload && <p style={{ fontFamily: tk.sans, fontSize: "11.5px", color: tk.onSurfaceTertiary, margin: "0 0 9px", textAlign: "center" }}>{p.building ? "Building…" : `Review all ${p.total} sections to unlock`}</p>}
-        <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("docx")} style={{ ...dlBtn(p.canDownload, true), width: "100%" }}>↓ Download DOCX</button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("docx")} style={{ ...dlBtn(p.canDownload, true), flex: 1 }}>↓ Download DOCX</button>
+          <button type="button" disabled={!p.canDownload} onClick={() => p.onDownload("pdf")} style={{ ...dlBtn(p.canDownload, false), flex: 1 }}>↓ Download PDF</button>
+        </div>
         {p.buildError && (
           <>
             <p role="alert" style={{ fontFamily: tk.sans, fontSize: "12px", color: tk.red, margin: "9px 0 0", textAlign: "center" }}>{p.buildError}</p>

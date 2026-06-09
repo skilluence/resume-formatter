@@ -173,6 +173,20 @@ def _looks_like_heading(line: str) -> bool:
         return False
     if "|" in s or "@" in s or "," in s or s.endswith((".", ":")):
         return False
+    # A real section heading is a label, never a line of data. Three tells of
+    # education CONTENT that must NOT be read as a heading (doing so splits the
+    # section and scatters the rows):
+    #   * digits   — a GPA / percentage / year ("CGPA: 8.5/10", "Class XII 2020")
+    #   * an institution or degree keyword ("UNIVERSITY OF NORTH TEXAS")
+    #   * an "of" connector in a proper name ("VELLORE INSTITUTE OF TECHNOLOGY")
+    # Known headings ("EDUCATION", "AREAS OF EXPERTISE") are matched by the exact
+    # synonym list in _heading_type BEFORE this fallback, so excluding them here is
+    # safe — the worst case for a bespoke "X OF Y" heading is that its line stays
+    # as body text, never lost.
+    if any(c.isdigit() for c in s):
+        return False
+    if _INSTITUTION_RE.search(s) or _DEGREE_RE.search(s) or re.search(r"\bof\b", s, re.I):
+        return False
     if _DATE_RANGE_RE.search(s):
         return False
     words = s.split()
@@ -351,6 +365,13 @@ def _looks_like_location(s: str) -> bool:
     s = s.strip()
     if not s:
         return False
+    # A long institution name that merely ends in a city ("New Jersey Institute of
+    # Technology – Newark, NJ") is the SCHOOL, not a bare location — don't peel it
+    # into the location field and lose it from the institution. The 5-word floor
+    # keeps a genuine city that happens to contain a school word ("College Park,
+    # MD") working as a location.
+    if _INSTITUTION_RE.search(s) and len(s.split()) >= 5:
+        return False
     if re.search(r",\s*[A-Z]{2}$", s):                  # "City, ST"
         return True
     last = s.split(",")[-1].strip().lower().strip(".")
@@ -520,6 +541,17 @@ _GRAD_LABEL_STRIP = re.compile(
 # so a real school ("Birla Institute of Technology", proper noun first) is NOT
 # matched. Kept with the degree, never treated as the awarding institution.
 _FACULTY_RE = re.compile(r"^(college|institute|school|faculty|department)\s+of\b", re.IGNORECASE)
+# An academic field / major, recognised by its tail noun ("Computer Science",
+# "Business Analytics", "Information Systems"). When a 'Degree - X' line has no
+# institution keyword, an X that ends like this is the MAJOR — kept with the
+# degree — whereas a bare acronym ("MIT") is the school. Anchored at the end so a
+# proper school name ("… Institute of Technology") is caught by the keyword test
+# first and never reaches this.
+_FIELD_TAIL_RE = re.compile(
+    r"\b(science|sciences|engineering|studies|arts|management|administration|systems|"
+    r"technology|mathematics|statistics|economics|commerce|computing|analytics|finance|"
+    r"design|education|psychology|biology|chemistry|physics|informatics|accounting|"
+    r"marketing|nursing|medicine|architecture|humanities|linguistics)\s*$", re.IGNORECASE)
 # A strong in-line field separator.
 _SEP_RE = re.compile(r"[|\t]|\s[–—\-]\s")
 # A GPA / CGPA / percentage token anywhere in a string.
@@ -592,7 +624,19 @@ def _split_degree_institution(text: str):
     rest = [p for p in others if p not in faculty]
     if not rest:
         return deg, ""
-    inst = next((p for p in rest if _INSTITUTION_RE.search(p)), rest[0])
+    inst = next((p for p in rest if _INSTITUTION_RE.search(p)), None)
+    if inst is None:
+        # No institution keyword in the remainder. A segment that names an academic
+        # field ("Computer Science") is the MAJOR — fold it into the degree so the
+        # real school (usually the next line) isn't pushed into a phantom entry. A
+        # keyword-less acronym like "MIT" has no field tail and stays the school.
+        field = next((p for p in rest if _FIELD_TAIL_RE.search(p)), None)
+        if field is not None:
+            deg = "  -  ".join([deg, field])
+            rest = [p for p in rest if p is not field]
+            if not rest:
+                return deg, ""
+        inst = rest[0]
     extras = [p for p in rest if p is not inst]
     return deg, (inst + ("  |  " + "  |  ".join(extras) if extras else ""))
 

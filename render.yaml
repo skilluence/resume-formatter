@@ -5,7 +5,13 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /
     envVars:
+      # AI Tailor feature (beta). Set the key in the Render dashboard, never in git.
       - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      # Optional: improves job-URL scraping for JS-heavy/blocked boards.
+      - key: FIRECRAWL_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false

@@ -34,6 +34,37 @@ LETTER_HEIGHT = Inches(11)
 USABLE_WIDTH_TWIPS = int((8.5 - 2 * 0.20) * 1440)
 
 
+# Inline **bold** markup. The AI Tailor feature emits **keyword** to bold ATS
+# terms; the deterministic /format flow never produces "**", so this is a no-op
+# there and the existing output stays byte-for-byte unchanged.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def _styled_run(paragraph, text: str, size, bold: bool, color=None):
+    run = paragraph.add_run(text)
+    run.bold = bold
+    run.font.name = FONT_NAME
+    run.font.size = size
+    if color is not None:
+        run.font.color.rgb = color
+    return run
+
+
+def _add_rich_runs(paragraph, text: str, size, base_bold: bool = False, color=None):
+    """Add `text` to `paragraph`, turning **...** spans into bold runs. Text with
+    no "**" produces a single run identical to a plain add_run, so callers that
+    never pass markup are completely unaffected."""
+    text = text or ""
+    pos = 0
+    for m in _BOLD_RE.finditer(text):
+        if m.start() > pos:
+            _styled_run(paragraph, text[pos:m.start()], size, base_bold, color)
+        _styled_run(paragraph, m.group(1), size, True, color)
+        pos = m.end()
+    if pos < len(text):
+        _styled_run(paragraph, text[pos:], size, base_bold, color)
+
+
 def _set_spacing(paragraph, before=0, after=0, line_rule="auto", line=240):
     pPr = paragraph._p.get_or_add_pPr()
     spacing = OxmlElement("w:spacing")
@@ -268,9 +299,7 @@ def _add_bullet(doc, text: str):
     p = doc.add_paragraph(style="List Bullet")
     _set_spacing(p, before=0, after=1)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    run = p.add_run(text)
-    run.font.name = FONT_NAME
-    run.font.size = BODY_SIZE
+    _add_rich_runs(p, text, BODY_SIZE)
 
     pPr = p._p.get_or_add_pPr()
     ind = OxmlElement("w:ind")
@@ -299,9 +328,7 @@ def _add_prose(doc, text: str):
     p = doc.add_paragraph()
     _set_spacing(p, before=0, after=1)
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    run = p.add_run(text)
-    run.font.name = FONT_NAME
-    run.font.size = BODY_SIZE
+    _add_rich_runs(p, text, BODY_SIZE)
 
 
 def _add_inline_items(doc, items: list):
@@ -363,9 +390,7 @@ def _render_summary(doc, data):
         p = doc.add_paragraph()
         _set_spacing(p, before=0, after=1)
         p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        run = p.add_run(data["summary"])
-        run.font.name = FONT_NAME
-        run.font.size = BODY_SIZE
+        _add_rich_runs(p, data["summary"], BODY_SIZE)
 
 
 def _render_skills(doc, data):
