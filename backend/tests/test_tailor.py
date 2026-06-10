@@ -52,10 +52,10 @@ SOURCE = {
 # What a well-behaved model would return (wording only, no facts, with **bold**).
 AI_REPLY = {
     "headline": "Senior Data Analyst | BI",
-    "summary": "Results-driven analyst with **SQL** and **Tableau** expertise.",
+    "summary": "Results-driven analyst with **SQL** and **Tableau** expertise, skilled in **A/B testing** and data storytelling.",
     "skills": {"Languages": ["SQL", "Python"], "BI": ["Tableau", "Power BI"]},
     "experience": [
-        {"bullets": [f"**Built** dashboard number {i} improving speed by [X%]." for i in range(6)]}
+        {"bullets": [f"**Built** dashboard number {i} improving speed by {20 + i}%." for i in range(6)]}
     ],
     "projects": [
         {"name": "Churn Model", "tech_stack": "Python, scikit-learn", "bullets": ["Built model with [X%] accuracy.", "Served [N] users."]},
@@ -75,6 +75,14 @@ AI_REPLY = {
         "signature": "WRONG NAME FROM MODEL",
     },
     "gaps": ["No cloud experience listed - add if you have it."],
+    "jd_skills": ["SQL", "Python", "Tableau", "Power BI", "Snowflake"],
+    "jd_keywords": ["A/B testing", "data storytelling"],
+    "changes": [
+        "Aligned the title and summary to the role",
+        "Added the JD's core skills and tools",
+        "Rewrote 6 experience bullets with metrics",
+        "Added 2 JD-relevant projects",
+    ],
 }
 
 
@@ -132,15 +140,70 @@ def test_em_dashes_scrubbed():
     assert "—" not in out["tailored_resume"]["summary"]
 
 
-def test_placeholders_kept_for_unknown_numbers():
+def test_concrete_numbers_no_placeholders():
     out = _run_with_reply(AI_REPLY)
     joined = " ".join(out["tailored_resume"]["experience"][0]["bullets"])
-    assert "[X%]" in joined
+    assert "[X%]" not in joined and "[" not in joined
+    assert "%" in joined  # concrete metric present
 
 
 def test_gaps_returned():
     out = _run_with_reply(AI_REPLY)
     assert out["gaps"] and "cloud" in out["gaps"][0].lower()
+
+
+def test_original_resume_echoed_back():
+    out = _run_with_reply(AI_REPLY)
+    assert out["original_resume"]["name"] == "Jane Doe"
+    # The source experience bullet is preserved on the original, not the tailored one.
+    assert out["original_resume"]["experience"][0]["bullets"] == ["did stuff"]
+
+
+def test_match_computed_after_beats_before():
+    out = _run_with_reply(AI_REPLY)
+    m = out["match"]
+    assert m["jd_skills"]
+    assert m["score_after"] >= m["score_before"]
+    assert "skills" in m and "keywords" in m
+    assert "missing_before" in m["skills"] and "added" in m["skills"]
+
+
+def test_coverage_guarantee_adds_all_jd_skills():
+    out = _run_with_reply(AI_REPLY)
+    from match import resume_text, contains
+    text = resume_text(out["tailored_resume"])
+    # Every JD hard skill must be present after the coverage guarantee...
+    for s in AI_REPLY["jd_skills"]:
+        assert contains(s, text), f"{s} missing after coverage guarantee"
+    assert out["match"]["skills"]["missing_after"] == []
+    # Snowflake (not in the AI's skills output) was auto-added under Core Skills.
+    assert "Core Skills" in out["tailored_resume"]["skills"]
+    assert "Snowflake" in out["tailored_resume"]["skills"]["Core Skills"]
+
+
+def test_tiered_floor_lifts_sparse_resume_to_at_least_70():
+    # SOURCE starts with almost nothing matching -> low before -> floor 72.
+    out = _run_with_reply(AI_REPLY)
+    assert out["match"]["score_before"] < 30
+    assert out["match"]["score_after"] >= 70
+
+
+def test_keywords_injected_into_core_competencies_when_needed():
+    # A reply whose summary/bullets DON'T mention the keywords forces injection.
+    reply = json.loads(json.dumps(AI_REPLY))
+    reply["summary"] = "Analyst skilled in **SQL** and **Tableau**."  # no A/B testing / storytelling
+    reply["jd_keywords"] = ["A/B testing", "data storytelling", "experimentation", "stakeholder management"]
+    out = _run_with_reply(reply)
+    skills = out["tailored_resume"]["skills"]
+    # Floor (72) reached by injecting some keywords into Core Competencies.
+    assert out["match"]["score_after"] >= 70
+    assert "Core Competencies" in skills
+
+
+def test_changes_returned():
+    out = _run_with_reply(AI_REPLY)
+    assert isinstance(out["changes"], list) and 3 <= len(out["changes"]) <= 6
+    assert any("summary" in c.lower() for c in out["changes"])
 
 
 def test_scrub_dashes_helper():

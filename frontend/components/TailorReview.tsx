@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, CSSProperties } from "react";
+import { useEffect, useMemo, useState, CSSProperties } from "react";
 import Link from "next/link";
 import { tk } from "@/lib/tokens";
 import {
@@ -17,9 +17,10 @@ import {
   type TailorDrafts,
   type TailorKind,
   type DownloadFormat,
+  type MatchInfo,
   downloadTailorOutput,
   emailToPlainText,
-  hasPlaceholder,
+  highlightTermsFromMatch,
 } from "@/lib/tailor";
 
 type Tab = "resume" | "cover_letter" | "email";
@@ -57,7 +58,18 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
 
   const baseName = (resume.name || "Application").replace(/[^A-Za-z0-9._-]+/g, "_") || "Application";
 
-  const placeholders = useMemo(() => countPlaceholders(drafts), [drafts]);
+  // Neon-green highlights = everything tailoring added (skills + keywords).
+  const highlightTerms = useMemo(() => highlightTermsFromMatch(drafts.match), [drafts.match]);
+  const highlight = useMemo(() => ({ highlightTerms }), [highlightTerms]);
+
+  // The floating match card overlays on wide screens; on narrow it sits inline.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const f = () => setNarrow(window.innerWidth < 1180);
+    f();
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
 
   // Section/order helpers (ported from Workspace).
   const sections = getSections(resume);
@@ -114,9 +126,7 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
       <div style={betaBanner}>
         <span style={betaPill}>BETA</span>
         <span style={{ fontSize: "13px", color: tk.onSurfaceSecondary }}>
-          Everything below is editable. {placeholders > 0
-            ? <><b style={{ color: tk.clayInteractive }}>{placeholders} placeholder{placeholders === 1 ? "" : "s"}</b> still need real numbers before you send.</>
-            : "No placeholders left - review the wording, then download."}
+          AI-drafted — review before sending.
         </span>
       </div>
 
@@ -156,13 +166,21 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
                 onDragEndSection={() => setDragId(null)}
               />
             </aside>
-            {/* RIGHT: large live preview */}
-            <div style={previewCol}>
-              <span style={previewLabel}>Live preview — your one-page DOCX</span>
+            {/* CENTER: full-width live preview with neon-green change highlights.
+                On wide screens we reserve a right gutter so the floating card never covers the page. */}
+            <div style={narrow ? previewCol : { ...previewCol, paddingRight: "336px" }}>
+              {narrow && <div style={{ marginBottom: "14px", maxWidth: "820px", marginLeft: "auto", marginRight: "auto" }}><MatchCard match={drafts.match} changes={drafts.changes} /></div>}
+              <span style={previewLabel}>Live preview</span>
               <div style={previewFrame}>
-                <ResumePreview resume={resume} status={status} showGpa={showGpa} sectionOrder={orderedBodyIds} showCoursework={showCoursework} />
+                <ResumePreview resume={resume} status={status} showGpa={showGpa} sectionOrder={orderedBodyIds} showCoursework={showCoursework} highlight={highlight} />
               </div>
             </div>
+            {/* Floating JD-match card, pinned to the middle-right (wide screens). */}
+            {!narrow && (
+              <div style={floatWrap}>
+                <MatchCard match={drafts.match} changes={drafts.changes} floating />
+              </div>
+            )}
           </div>
         )}
 
@@ -404,16 +422,83 @@ function Header({ onStartOver }: { onStartOver: () => void }) {
   );
 }
 
-/* ── helpers ─────────────────────────────────────────────────────────────── */
-function countPlaceholders(d: TailorDrafts): number {
-  const texts: string[] = [];
-  const r = d.tailored_resume;
-  if (r.summary) texts.push(r.summary);
-  r.experience.forEach((j) => texts.push(...j.bullets));
-  r.projects.forEach((pr) => texts.push(...pr.bullets));
-  d.cover_letter.body_paragraphs.forEach((pp) => texts.push(pp));
-  d.email.body_paragraphs.forEach((pp) => texts.push(pp));
-  return texts.filter(hasPlaceholder).reduce((n, t) => n + (t.match(/\[[^\]]+\]/g)?.length || 0), 0);
+/* ── MatchCard: the floating JD-match card (gauge + "what changed" + counts).
+   Refined within the app's warm palette: layered shadow, a conic score ring that
+   sweeps in on mount, and a tight change-log. ─────────────────────────────── */
+function MatchCard({ match, changes, floating }: { match: MatchInfo; changes: string[]; floating?: boolean }) {
+  const after = match?.score_after ?? 0;
+  const before = match?.score_before ?? 0;
+  const delta = after - before;
+  const color = after >= 85 ? tk.green : after >= 70 ? "#3f9b54" : after >= 50 ? "#c9851f" : tk.red;
+  const grade = after >= 90 ? "Excellent" : after >= 80 ? "Strong" : after >= 65 ? "Good" : after >= 50 ? "Fair" : "Weak";
+  const skillsAdded = match?.skills?.added?.length || 0;
+  const kwAdded = match?.keywords?.added?.length || 0;
+  const R = 34, C = 2 * Math.PI * R;
+
+  // Sweep the ring from empty to `after%` on mount.
+  const [drawn, setDrawn] = useState(0);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setDrawn(after));
+    return () => cancelAnimationFrame(id);
+  }, [after]);
+
+  return (
+    <section style={floating ? { ...matchCard, ...matchCardFloating } : matchCard} aria-label="JD match score">
+      <div style={matchCardHeader}>
+        <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", color: tk.onSurfaceTertiary }}>JD MATCH</span>
+        <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#fff", background: color, padding: "2px 9px", borderRadius: "999px" }}>{grade}</span>
+      </div>
+
+      {/* Score ring: sweeps from 0 to `after` on mount */}
+      <div style={{ display: "flex", alignItems: "center", gap: "16px", margin: "4px 0 14px" }}>
+        <div style={{ position: "relative", width: "88px", height: "88px", flexShrink: 0 }}>
+          <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden>
+            <circle cx="44" cy="44" r={R} fill="none" stroke={tk.borderTertiary} strokeWidth="8" />
+            <circle cx="44" cy="44" r={R} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={C - (drawn / 100) * C} transform="rotate(-90 44 44)"
+              style={{ transition: "stroke-dashoffset 0.9s cubic-bezier(0.22,1,0.36,1)" }} />
+          </svg>
+          <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <b style={{ fontFamily: tk.serif, fontSize: "26px", fontWeight: 600, color }}>{after}<span style={{ fontSize: "14px" }}>%</span></b>
+          </span>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: "14px", color: tk.onSurfaceSecondary }}>
+            <span style={{ color: tk.onSurfaceTertiary }}>{before}%</span>
+            <span style={{ color: tk.onSurfaceGhost, margin: "0 5px" }}>→</span>
+            <b style={{ color }}>{after}%</b>
+          </div>
+          {delta > 0 && (
+            <div style={{ display: "inline-block", marginTop: "5px", fontSize: "11.5px", fontWeight: 700, color: tk.green, background: tk.greenSurface, padding: "2px 8px", borderRadius: "6px" }}>▲ +{delta} pts</div>
+          )}
+          {(skillsAdded > 0 || kwAdded > 0) && (
+            <div style={{ fontSize: "11px", color: tk.onSurfaceTertiary, marginTop: "6px" }}>
+              +{skillsAdded} skills · +{kwAdded} keywords
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* What changed — the jobright-style change log */}
+      {changes?.length > 0 && (
+        <div style={{ borderTop: `1px solid ${tk.borderTertiary}`, paddingTop: "11px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.04em", color: tk.onSurface }}>WHAT CHANGED</span>
+          <ul style={{ listStyle: "none", margin: "9px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: "7px" }}>
+            {changes.slice(0, 5).map((c, i) => (
+              <li key={i} style={{ display: "flex", gap: "8px", fontSize: "12.5px", color: tk.onSurfaceSecondary, lineHeight: 1.45 }}>
+                <span style={{ color: tk.green, flexShrink: 0, fontWeight: 700 }}>✓</span>
+                <span>{c}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p style={{ fontSize: "10.5px", color: tk.onSurfaceTertiary, margin: "11px 0 0", lineHeight: 1.5 }}>
+        Added terms are <span style={{ ...chipNeon, padding: "0 4px", fontSize: "10.5px" }}>highlighted</span> in the preview.
+      </p>
+    </section>
+  );
 }
 
 /* ── styles ──────────────────────────────────────────────────────────────── */
@@ -421,12 +506,19 @@ const shell: CSSProperties = { height: "100vh", display: "flex", flexDirection: 
 const headerStyle: CSSProperties = { height: "56px", flexShrink: 0, display: "flex", alignItems: "center", padding: "0 clamp(16px,4vw,28px)", borderBottom: `1px solid ${tk.borderTertiary}`, background: "#faf9f5", zIndex: 40 };
 const betaBanner: CSSProperties = { flexShrink: 0, display: "flex", alignItems: "center", gap: "10px", padding: "9px clamp(16px,4vw,28px)", background: tk.surfaceTertiary, borderBottom: `1px solid ${tk.borderTertiary}` };
 const betaPill: CSSProperties = { fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", color: "#fff", background: tk.clayInteractive, padding: "3px 8px", borderRadius: "6px" };
+const chipNeon: CSSProperties = { fontSize: "11px", color: "#2d3a00", background: "#caff5e", border: "1px solid #aee63a", borderRadius: "999px", padding: "2px 9px" };
 const tabBar: CSSProperties = { flexShrink: 0, display: "flex", gap: "8px", padding: "10px clamp(16px,4vw,28px) 0", borderBottom: `1px solid ${tk.borderTertiary}` };
 const body: CSSProperties = { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" };
-const twoCol: CSSProperties = { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "clamp(420px, 40%, 600px) 1fr" };
+// 2 columns: left edit rail · full-width preview. The match card floats over the right gutter.
+const twoCol: CSSProperties = { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "clamp(380px,38%,560px) 1fr" };
 const editCol: CSSProperties = { minWidth: 0, overflowY: "auto", padding: "16px clamp(14px,2vw,20px) 40px", borderRight: `1px solid ${tk.borderTertiary}`, background: tk.surfaceSecondary };
-const previewCol: CSSProperties = { minWidth: 0, overflowY: "auto", padding: "16px clamp(16px,2vw,28px) 40px", background: "#e9e7df", display: "flex", flexDirection: "column" };
-const previewLabel: CSSProperties = { display: "block", fontSize: "12px", color: tk.onSurfaceSecondary, fontWeight: 600, marginBottom: "10px", flexShrink: 0 };
+const previewCol: CSSProperties = { minWidth: 0, overflowY: "auto", padding: "16px clamp(16px,2vw,28px) 40px", background: "#e9e7df", display: "flex", flexDirection: "column", position: "relative" };
+const previewLabel: CSSProperties = { fontSize: "12px", color: tk.onSurfaceSecondary, fontWeight: 600, paddingTop: "4px", marginBottom: "10px" };
+// Floating match card: fixed to the right gutter, vertically centered, never covers the page.
+const floatWrap: CSSProperties = { position: "fixed", right: "24px", top: "calc(50% + 30px)", transform: "translateY(-50%)", zIndex: 30, pointerEvents: "none" };
+const matchCard: CSSProperties = { background: "#fff", border: `1px solid ${tk.borderSecondary}`, borderRadius: "16px", padding: "16px 16px 14px", boxShadow: "0 4px 16px rgba(20,20,19,0.07)" };
+const matchCardFloating: CSSProperties = { width: "300px", maxWidth: "26vw", pointerEvents: "auto", boxShadow: "0 18px 50px -12px rgba(20,20,19,0.28), 0 4px 12px rgba(20,20,19,0.08)", animation: "rf-fade 0.5s cubic-bezier(0.22,1,0.36,1) both" };
+const matchCardHeader: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" };
 const previewFrame: CSSProperties = { width: "100%", maxWidth: "820px", margin: "0 auto" };
 const scrollPane: CSSProperties = { flex: 1, minHeight: 0, overflowY: "auto", padding: "22px clamp(16px,4vw,28px) 50px" };
 const singleCol: CSSProperties = { maxWidth: "760px", margin: "0 auto" };

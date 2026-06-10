@@ -17,12 +17,47 @@ export interface EmailDraft {
   signature: string;
 }
 
+/* Per-list delta: what the JD asked for that was missing before tailoring, what is
+   still missing after, and what tailoring ADDED (present after, absent before). */
+export interface KeywordDelta {
+  missing_before: string[];
+  missing_after: string[];
+  added: string[];
+}
+
+export interface MatchInfo {
+  score_before: number;
+  score_after: number;
+  skills: KeywordDelta;
+  keywords: KeywordDelta;
+  jd_skills: string[];
+  jd_keywords: string[];
+}
+
+/* The terms to paint neon-green in the preview = everything tailoring added
+   (skills + keywords now present that the original resume lacked). */
+export function highlightTermsFromMatch(match: MatchInfo): string[] {
+  const all = [...(match?.skills?.added || []), ...(match?.keywords?.added || [])];
+  const seen = new Set<string>();
+  return all.filter((t) => {
+    const k = t.trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export interface TailorDrafts {
   tailored_resume: Resume;
+  original_resume: Resume;
   cover_letter: CoverLetter;
   email: EmailDraft;
+  match: MatchInfo;
+  /* 4-5 short "what changed" bullets (jobright-style change log). */
+  changes: string[];
   gaps: string[];
 }
+
 
 export type TailorKind = "resume" | "cover_letter" | "email";
 export type DownloadFormat = "docx" | "pdf";

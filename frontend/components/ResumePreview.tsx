@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, CSSProperties, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, Fragment, CSSProperties, ReactNode } from "react";
 import { tk, doc } from "@/lib/tokens";
 import { isCoursework, type Resume, type StatusMap } from "@/lib/resume";
+import { renderRich, type RichOpts } from "@/lib/rich";
 
 /* ────────────────────────────────────────────────────────────────────────────
    ResumePreview — the live document as real, paginated A4 pages (like Word).
@@ -28,10 +29,13 @@ interface Props {
   showGpa: boolean;
   sectionOrder?: string[];
   showCoursework?: boolean;
+  /* Optional: paint added skills/keywords neon-green (AI Tailor only).
+     Absent on /format -> text renders identically (renderRich fast-path). */
+  highlight?: RichOpts;
 }
 
-export default function ResumePreview({ resume, status, showGpa, sectionOrder, showCoursework }: Props) {
-  const blocks = useMemo(() => buildBlocks(resume, status, showGpa, sectionOrder, showCoursework), [resume, status, showGpa, sectionOrder, showCoursework]);
+export default function ResumePreview({ resume, status, showGpa, sectionOrder, showCoursework, highlight }: Props) {
+  const blocks = useMemo(() => buildBlocks(resume, status, showGpa, sectionOrder, showCoursework, highlight), [resume, status, showGpa, sectionOrder, showCoursework, highlight]);
   const measureRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<number[][]>([blocks.map((_, i) => i)]);
@@ -109,8 +113,9 @@ function eqPages(a: number[][], b: number[][]) {
 }
 
 /* ── build the ordered list of atomic blocks ────────────────────────────── */
-function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?: string[], showCoursework?: boolean): ReactNode[] {
+function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?: string[], showCoursework?: boolean, opts: RichOpts = {}): ReactNode[] {
   const kept = (id: string) => status[id] !== "skipped";
+  const rich = (t: string) => renderRich(t, opts);
   const out: ReactNode[] = [];
 
   out.push(<Identity key="id" resume={resume} />);
@@ -128,7 +133,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
   };
 
   const emitSummary = () => {
-    if (resume.summary) section("summary", "Professional Summary", [<p key="s" style={bodyJustify}>{resume.summary}</p>]);
+    if (resume.summary) section("summary", "Professional Summary", [<p key="s" style={bodyJustify}>{rich(resume.summary)}</p>]);
   };
 
   const emitSkills = () => {
@@ -139,7 +144,10 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
         Object.entries(resume.skills).map(([cat, items], i) => (
           <p key={i} style={{ ...bodyText, margin: "0 0 2px" }}>
             <span style={{ fontWeight: 700 }}>{cat}: </span>
-            {items.join(", ")}
+            {/* render each skill individually so an added one can be highlighted */}
+            {items.map((it, k) => (
+              <Fragment key={k}>{k > 0 ? ", " : ""}{rich(it)}</Fragment>
+            ))}
           </p>
         ))
       );
@@ -157,7 +165,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
             <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{[job.start_date, job.end_date].filter(Boolean).join(" – ")}</span>
           </p>
         ),
-        bullets: job.bullets,
+        bullets: job.bullets.map(rich),
       }))));
     }
   };
@@ -171,7 +179,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
             {p.tech_stack ? <span style={{ fontStyle: "italic" }}>{`  |  ${p.tech_stack}`}</span> : null}
           </p>
         ),
-        bullets: p.bullets,
+        bullets: p.bullets.map(rich),
       }))));
     }
   };
@@ -188,7 +196,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
             {c.date ? <span style={{ whiteSpace: "nowrap" }}>{c.date}</span> : null}
           </p>
         ),
-        bullets: c.bullets,
+        bullets: c.bullets.map(rich),
       }))));
     }
   };
@@ -206,7 +214,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
           </p>
           {showGpa && e.gpa ? <p style={{ ...bodyText, margin: 0 }}>{e.gpa}</p> : null}
           {e.details.filter((d) => showCoursework || !isCoursework(d)).map((d, j) => (
-            <Bullet key={j}>{d}</Bullet>
+            <Bullet key={j}>{rich(d)}</Bullet>
           ))}
         </div>
       )));
@@ -217,8 +225,8 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
     const sec = (resume.additional_sections || [])[i];
     if (!sec) return;
     const lines: ReactNode[] = [];
-    if (sec.text) lines.push(<p key="t" style={bodyJustify}>{sec.text}</p>);
-    sec.items.forEach((it, j) => lines.push(<Bullet key={j}>{it}</Bullet>));
+    if (sec.text) lines.push(<p key="t" style={bodyJustify}>{rich(sec.text)}</p>);
+    sec.items.forEach((it, j) => lines.push(<Bullet key={j}>{rich(it)}</Bullet>));
     section(`additional-${i}`, sec.heading, lines);
   };
 
@@ -248,7 +256,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
 
 // Each entry becomes lines: [head + first bullet] then remaining bullets — so an
 // entry header is never stranded alone at the bottom of a page.
-function entriesToLines(entries: { head: ReactNode; bullets: string[] }[]): ReactNode[] {
+function entriesToLines(entries: { head: ReactNode; bullets: ReactNode[] }[]): ReactNode[] {
   const lines: ReactNode[] = [];
   entries.forEach((e, ei) => {
     if (e.bullets.length === 0) {
