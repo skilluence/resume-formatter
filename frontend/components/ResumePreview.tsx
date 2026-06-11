@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, Fragment, CSSProperties, ReactNod
 import { tk, doc } from "@/lib/tokens";
 import { isCoursework, type Resume, type StatusMap } from "@/lib/resume";
 import { renderRich, type RichOpts } from "@/lib/rich";
+import { fitProjects, type FitMeta } from "@/lib/fit";
 
 /* ────────────────────────────────────────────────────────────────────────────
    ResumePreview — the live document as real, paginated A4 pages (like Word).
@@ -15,13 +16,29 @@ import { renderRich, type RichOpts } from "@/lib/rich";
    what downloads.
 ──────────────────────────────────────────────────────────────────────────── */
 
-const PAGE_W = 794; // A4 width  @ 96dpi
-const PAGE_H = 1123; // A4 height @ 96dpi
+// US Letter @ 96dpi — matches the real DOCX page (compact_ats.py is 8.5"x11"),
+// so the measured page count lines up with what actually downloads.
+const PAGE_W = 816; // 8.5" * 96
+const PAGE_H = 1056; // 11" * 96
 const PAD = 19; // 0.2" margin (mirrors compact_ats.py)
 const CONTENT_W = PAGE_W - PAD * 2;
 const CONTENT_H = PAGE_H - PAD * 2;
 const LIMIT = CONTENT_H - 20; // small safety buffer (margins aren't in offsetHeight)
 const GAP = 26; // gap between page sheets
+
+/* A trimmable project-bullet block carries {pi, rank}; everything else is null. */
+interface Block {
+  node: ReactNode;
+  meta: FitMeta;
+}
+const nm = (node: ReactNode): Block => ({ node, meta: null });
+
+export interface FitInfo {
+  pages: number;
+  lastFillPct: number;
+  /* Bullets shown per project index — the download trims to match the preview. */
+  fittedCounts: number[];
+}
 
 interface Props {
   resume: Resume;
@@ -32,34 +49,66 @@ interface Props {
   /* Optional: paint added skills/keywords neon-green (AI Tailor only).
      Absent on /format -> text renders identically (renderRich fast-path). */
   highlight?: RichOpts;
+  /* AI Tailor only: auto-trim project bullets (2-6) to land on a clean page
+     boundary. OFF by default, so the deterministic /format preview shows every
+     bullet and never drops data. */
+  fitToPages?: boolean;
+  onFit?: (info: FitInfo) => void;
 }
 
-export default function ResumePreview({ resume, status, showGpa, sectionOrder, showCoursework, highlight }: Props) {
+export default function ResumePreview({ resume, status, showGpa, sectionOrder, showCoursework, highlight, fitToPages, onFit }: Props) {
   const blocks = useMemo(() => buildBlocks(resume, status, showGpa, sectionOrder, showCoursework, highlight), [resume, status, showGpa, sectionOrder, showCoursework, highlight]);
   const measureRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<number[][]>([blocks.map((_, i) => i)]);
   const [scale, setScale] = useState(1);
+  const lastFitRef = useRef<string>("");
 
-  // Pack blocks onto pages by measured height — never split a block.
+  // Measure every block once, optionally fit project bullets to clean page
+  // boundaries, then pack the SHOWN blocks onto pages (never splitting a block).
   useEffect(() => {
     const c = measureRef.current;
     if (!c) return;
     const heights = Array.from(c.children).map((el) => (el as HTMLElement).offsetHeight);
+    const meta = blocks.map((b) => b.meta);
+    const shown = fitToPages ? fitProjects(heights, meta, LIMIT).shownByProject : {};
+    const trimmed = (i: number) => {
+      const m = meta[i];
+      return !!(fitToPages && m && m.rank >= (shown[m.pi] ?? Infinity));
+    };
+
     const packed: number[][] = [];
+    const perPage: number[] = [];
     let cur: number[] = [];
     let h = 0;
-    heights.forEach((bh, i) => {
+    for (let i = 0; i < heights.length; i++) {
+      if (trimmed(i)) continue;
+      const bh = heights[i];
       if (cur.length && h + bh > LIMIT) {
         packed.push(cur);
+        perPage.push(h);
         cur = [];
         h = 0;
       }
       cur.push(i);
       h += bh;
-    });
-    if (cur.length) packed.push(cur);
+    }
+    if (cur.length) {
+      packed.push(cur);
+      perPage.push(h);
+    }
     setPages((prev) => (eqPages(prev, packed) ? prev : packed));
+
+    if (onFit) {
+      const pagesN = packed.length;
+      const lastFillPct = pagesN ? Math.round(Math.min(1, perPage[pagesN - 1] / LIMIT) * 100) : 0;
+      const fittedCounts = (resume.projects || []).map((p, pi) => shown[pi] ?? (p.bullets?.length ?? 0));
+      const key = JSON.stringify([pagesN, lastFillPct, fittedCounts]);
+      if (key !== lastFitRef.current) {
+        lastFitRef.current = key;
+        onFit({ pages: pagesN, lastFillPct, fittedCounts });
+      }
+    }
   });
 
   // Scale the page stack to fit the available width (responsive).
@@ -80,7 +129,7 @@ export default function ResumePreview({ resume, status, showGpa, sectionOrder, s
       {/* hidden per-block measurer at exact content width */}
       <div ref={measureRef} aria-hidden style={{ position: "absolute", left: -99999, top: 0, width: `${CONTENT_W}px`, visibility: "hidden", pointerEvents: "none", fontFamily: doc.font }}>
         {blocks.map((b, i) => (
-          <div key={i}>{b}</div>
+          <div key={i}>{b.node}</div>
         ))}
       </div>
 
@@ -91,7 +140,7 @@ export default function ResumePreview({ resume, status, showGpa, sectionOrder, s
             <div key={p} style={pageStyle} role="document" aria-label={`Resume page ${p + 1} of ${pages.length}`}>
               <div style={{ width: `${CONTENT_W}px` }}>
                 {idxs.map((i) => (
-                  <div key={i}>{blocks[i]}</div>
+                  <div key={i}>{blocks[i].node}</div>
                 ))}
               </div>
               <span style={pageNum}>{p + 1} / {pages.length}</span>
@@ -113,27 +162,30 @@ function eqPages(a: number[][], b: number[][]) {
 }
 
 /* ── build the ordered list of atomic blocks ────────────────────────────── */
-function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?: string[], showCoursework?: boolean, opts: RichOpts = {}): ReactNode[] {
+function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?: string[], showCoursework?: boolean, opts: RichOpts = {}): Block[] {
   const kept = (id: string) => status[id] !== "skipped";
   const rich = (t: string) => renderRich(t, opts);
-  const out: ReactNode[] = [];
+  const out: Block[] = [];
 
-  out.push(<Identity key="id" resume={resume} />);
+  out.push(nm(<Identity key="id" resume={resume} />));
 
   // push a section: header rides along with its first content line (no orphan)
-  const section = (id: string, title: string, lines: ReactNode[]) => {
+  const section = (id: string, title: string, lines: Block[]) => {
     if (!kept(id) || lines.length === 0) return;
-    out.push(
-      <div key={`${id}-0`}>
-        <SectionHeader title={title} />
-        {lines[0]}
-      </div>
-    );
-    for (let i = 1; i < lines.length; i++) out.push(<div key={`${id}-${i}`}>{lines[i]}</div>);
+    out.push({
+      node: (
+        <div key={`${id}-0`}>
+          <SectionHeader title={title} />
+          {lines[0].node}
+        </div>
+      ),
+      meta: lines[0].meta,
+    });
+    for (let i = 1; i < lines.length; i++) out.push(lines[i]);
   };
 
   const emitSummary = () => {
-    if (resume.summary) section("summary", "Professional Summary", [<p key="s" style={bodyJustify}>{rich(resume.summary)}</p>]);
+    if (resume.summary) section("summary", "Professional Summary", [nm(<p key="s" style={bodyJustify}>{rich(resume.summary)}</p>)]);
   };
 
   const emitSkills = () => {
@@ -141,7 +193,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
       section(
         "skills",
         "Technical Skills",
-        Object.entries(resume.skills).map(([cat, items], i) => (
+        Object.entries(resume.skills).map(([cat, items], i) => nm(
           <p key={i} style={{ ...bodyText, margin: "0 0 2px" }}>
             <span style={{ fontWeight: 700 }}>{cat}: </span>
             {/* render each skill individually so an added one can be highlighted */}
@@ -172,15 +224,20 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
 
   const emitProjects = () => {
     if (resume.projects?.length > 0) {
-      section("projects", "Projects", entriesToLines(resume.projects.map((p) => ({
-        head: (
-          <p style={{ ...bodyText, margin: "3px 0 0" }}>
-            <span style={{ fontWeight: 700 }}>{p.name}</span>
-            {p.tech_stack ? <span style={{ fontStyle: "italic" }}>{`  |  ${p.tech_stack}`}</span> : null}
-          </p>
-        ),
-        bullets: p.bullets.map(rich),
-      }))));
+      // Project bullets beyond the first are trimmable — tag them {pi, rank} so
+      // the page-fill engine can show only the top 2-6 per project.
+      section("projects", "Projects", entriesToLines(
+        resume.projects.map((p) => ({
+          head: (
+            <p style={{ ...bodyText, margin: "3px 0 0" }}>
+              <span style={{ fontWeight: 700 }}>{p.name}</span>
+              {p.tech_stack ? <span style={{ fontStyle: "italic" }}>{`  |  ${p.tech_stack}`}</span> : null}
+            </p>
+          ),
+          bullets: p.bullets.map(rich),
+        })),
+        (ei, bi) => (bi >= 1 ? { pi: ei, rank: bi } : null)
+      ));
     }
   };
 
@@ -203,7 +260,7 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
 
   const emitEducation = () => {
     if (resume.education?.length > 0) {
-      section("education", "Education", resume.education.map((e, i) => (
+      section("education", "Education", resume.education.map((e, i) => nm(
         <div key={i} style={{ marginBottom: "3px" }}>
           <p style={{ ...bodyText, display: "flex", justifyContent: "space-between", margin: "1px 0 0", gap: "8px" }}>
             <span style={{ fontWeight: 700 }}>{e.degree}</span>
@@ -224,9 +281,9 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
   const emitAdditional = (i: number) => {
     const sec = (resume.additional_sections || [])[i];
     if (!sec) return;
-    const lines: ReactNode[] = [];
-    if (sec.text) lines.push(<p key="t" style={bodyJustify}>{rich(sec.text)}</p>);
-    sec.items.forEach((it, j) => lines.push(<Bullet key={j}>{rich(it)}</Bullet>));
+    const lines: Block[] = [];
+    if (sec.text) lines.push(nm(<p key="t" style={bodyJustify}>{rich(sec.text)}</p>));
+    sec.items.forEach((it, j) => lines.push(nm(<Bullet key={j}>{rich(it)}</Bullet>)));
     section(`additional-${i}`, sec.heading, lines);
   };
 
@@ -255,20 +312,26 @@ function buildBlocks(resume: Resume, status: StatusMap, showGpa: boolean, order?
 }
 
 // Each entry becomes lines: [head + first bullet] then remaining bullets — so an
-// entry header is never stranded alone at the bottom of a page.
-function entriesToLines(entries: { head: ReactNode; bullets: ReactNode[] }[]): ReactNode[] {
-  const lines: ReactNode[] = [];
+// entry header is never stranded alone at the bottom of a page. `metaFor(ei, bi)`
+// tags trimmable bullets (used for project bullets so the fitter can drop them).
+function entriesToLines(
+  entries: { head: ReactNode; bullets: ReactNode[] }[],
+  metaFor: (ei: number, bi: number) => FitMeta = () => null,
+): Block[] {
+  const lines: Block[] = [];
   entries.forEach((e, ei) => {
     if (e.bullets.length === 0) {
-      lines.push(<div key={`e${ei}`} style={{ marginBottom: "4px" }}>{e.head}</div>);
+      lines.push(nm(<div key={`e${ei}`} style={{ marginBottom: "4px" }}>{e.head}</div>));
     } else {
-      lines.push(
+      lines.push(nm(
         <div key={`e${ei}`}>
           {e.head}
           <Bullet>{e.bullets[0]}</Bullet>
         </div>
-      );
-      for (let b = 1; b < e.bullets.length; b++) lines.push(<Bullet key={`e${ei}b${b}`}>{e.bullets[b]}</Bullet>);
+      ));
+      for (let b = 1; b < e.bullets.length; b++) {
+        lines.push({ node: <Bullet key={`e${ei}b${b}`}>{e.bullets[b]}</Bullet>, meta: metaFor(ei, b) });
+      }
     }
   });
   return lines;
@@ -341,4 +404,19 @@ const pageStyle: CSSProperties = {
   flexShrink: 0,
   overflow: "hidden",
 };
-const pageNum: CSSProperties = { position: "absolute", bottom: "8px", right: "12px", fontFamily: tk.sans, fontSize: "10px", color: tk.onSurfaceGhost };
+const pageNum: CSSProperties = {
+  position: "absolute",
+  bottom: "5px",
+  left: "50%",
+  transform: "translateX(-50%)",
+  fontFamily: tk.sans,
+  fontSize: "9.5px",
+  fontWeight: 500,
+  letterSpacing: "0.03em",
+  color: tk.onSurfaceTertiary,
+  background: "rgba(255,255,255,0.92)",
+  border: `1px solid ${tk.borderTertiary}`,
+  borderRadius: "999px",
+  padding: "1px 9px",
+  pointerEvents: "none",
+};

@@ -375,3 +375,13 @@
 @keyframes rf-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ─── Responsive helpers ─── */
+/* Collapse the landing-page nav on small screens so it never overflows the
+   header: drop "How it works" first, then the Tailor link, leaving the CTA. */
+@media (max-width: 640px) {
+  .lp-hide-sm { display: none !important; }
+}
+@media (max-width: 440px) {
+  .lp-hide-xs { display: none !important; }
+}

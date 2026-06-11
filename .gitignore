@@ -30,3 +30,6 @@ backend/package-lock.json
 Thumbs.db
 DemoResumes
 .kombai
+
+# Local deploy notes (private runbook, not part of the repo)
+deploy.md

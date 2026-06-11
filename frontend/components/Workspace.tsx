@@ -658,7 +658,7 @@ const headerStyle: CSSProperties = {
   flexShrink: 0,
 };
 const railStyle: CSSProperties = {
-  width: "600px",
+  width: "clamp(360px, 40%, 600px)",
   flexShrink: 0,
   borderRight: `1px solid ${tk.borderTertiary}`,
   background: tk.surfaceSecondary,

@@ -50,12 +50,61 @@ def _empty_email(name: str) -> dict:
     }
 
 
+MAX_EXP_BULLETS = 6   # every role is normalized to at most this many bullets
+MAX_PROJ_BULLETS = 6  # the page-fill engine then shows between 2 and 6 of these
+
+
+def _clean_bullets(raw) -> list:
+    return [str(b) for b in (raw or []) if str(b).strip()]
+
+
+def _normalize_exp_bullets(ai_bullets, source_bullets) -> list:
+    """Cap a role at 6 bullets; never wipe a role. Condensing >6 source bullets
+    into 6 strong lines is the model's job (see prompts.py); this only caps the
+    count and, if the model returned nothing, keeps the source bullets so a role
+    can never go blank."""
+    cleaned = _clean_bullets(ai_bullets)
+    if not cleaned:
+        return _clean_bullets(source_bullets)
+    return cleaned[:MAX_EXP_BULLETS]
+
+
+def _merge_skills(source_skills: dict, ai_skills) -> dict:
+    """Take the AI's (re-organized, JD-ordered) skill categories as the base, but
+    GUARANTEE every source skill survives: any skill the AI dropped is restored to
+    its original category (recreating that category if the AI dropped it whole).
+    The user's resume skills are never lost - we only ADD/re-order, never remove."""
+    if not isinstance(ai_skills, dict) or not ai_skills:
+        return {str(k): [str(s) for s in v if str(s).strip()]
+                for k, v in (source_skills or {}).items() if isinstance(v, list)}
+
+    merged = {}
+    for k, v in ai_skills.items():
+        if isinstance(v, list):
+            items = [str(s) for s in v if str(s).strip()]
+            if items:
+                merged[str(k)] = items
+
+    present = {s.lower() for items in merged.values() for s in items}
+    for cat, items in (source_skills or {}).items():
+        missing = [str(s) for s in (items or []) if str(s).strip() and str(s).lower() not in present]
+        if missing:
+            merged[str(cat)] = merged.get(str(cat), []) + missing
+            present |= {s.lower() for s in missing}
+    return merged
+
+
 def _merge_resume(source: dict, ai: dict) -> dict:
     """Build the tailored resume: AI provides wording, source provides every fact.
 
-    - headline / summary / skills / projects: taken from the AI (content fields).
-    - experience: AI supplies bullets ONLY; title/company/location/dates come from
-      the source job at the same index (re-stamped, never trusted from the model).
+    - headline / summary / skills: taken from the AI (content fields).
+    - experience: AI supplies bullets ONLY (capped at 6); title/company/location/
+      dates come from the source job at the same index (re-stamped).
+    - projects: merged 1:1 BY SOURCE INDEX. The project NAME is a fact and always
+      comes from the source; the AI may only supply tech_stack + ranked bullets.
+      Every source project survives - none are dropped, renamed, reordered, or
+      capped in number. Each project also carries `candidate_bullets` (the full
+      ranked set, up to 6) that the frontend page-fill engine trims from.
     - name / contact / education / certifications / additional_sections: verbatim
       from the source. These are facts and are never sent through the model.
     """
@@ -65,50 +114,69 @@ def _merge_resume(source: dict, ai: dict) -> dict:
         out["headline"] = ai["headline"]
     if ai.get("summary"):
         out["summary"] = ai["summary"]
-    if isinstance(ai.get("skills"), dict) and ai["skills"]:
-        # Keep only list-of-strings categories; drop anything malformed.
-        out["skills"] = {
-            str(k): [str(s) for s in v if str(s).strip()]
-            for k, v in ai["skills"].items()
-            if isinstance(v, list) and any(str(s).strip() for s in v)
-        }
+    if ai.get("summary_short"):
+        out["summary_short"] = ai["summary_short"]
+    out["skills"] = _merge_skills(source.get("skills") or {}, ai.get("skills"))
 
+    # Experience: iterate the SOURCE jobs so the set of roles can never change.
     ai_exp = ai.get("experience") or []
     for i, job in enumerate(out.get("experience") or []):
-        if i < len(ai_exp) and isinstance(ai_exp[i], dict):
-            bullets = ai_exp[i].get("bullets")
-            if isinstance(bullets, list) and bullets:
-                job["bullets"] = [str(b) for b in bullets if str(b).strip()]
+        ai_job = ai_exp[i] if i < len(ai_exp) and isinstance(ai_exp[i], dict) else {}
+        job["bullets"] = _normalize_exp_bullets(ai_job.get("bullets"), job.get("bullets"))
 
-    ai_projects = ai.get("projects")
-    if isinstance(ai_projects, list) and ai_projects:
-        cleaned = []
-        for p in ai_projects:
-            if not isinstance(p, dict):
-                continue
-            cleaned.append(
-                {
-                    "name": str(p.get("name") or "").strip(),
-                    "tech_stack": (str(p.get("tech_stack")).strip() or None)
-                    if p.get("tech_stack")
-                    else None,
-                    "bullets": [str(b) for b in (p.get("bullets") or []) if str(b).strip()],
-                }
-            )
-        if cleaned:
-            out["projects"] = cleaned
+    # Projects: iterate the SOURCE projects so the set of projects can never change.
+    ai_projects = ai.get("projects") or []
+    for i, proj in enumerate(out.get("projects") or []):
+        ai_proj = ai_projects[i] if i < len(ai_projects) and isinstance(ai_projects[i], dict) else {}
+        # NAME stays from the source (identity) - never trust the model's name.
+        ts = ai_proj.get("tech_stack")
+        if ts and str(ts).strip():
+            proj["tech_stack"] = str(ts).strip()
+        ai_bullets = _clean_bullets(ai_proj.get("bullets"))
+        bullets = (ai_bullets or _clean_bullets(proj.get("bullets")))[:MAX_PROJ_BULLETS]
+        proj["bullets"] = bullets
+        proj["candidate_bullets"] = list(bullets)
 
+    _assert_identity_preserved(source, out)
     return out
 
 
+def _assert_identity_preserved(source: dict, out: dict) -> None:
+    """Defense-in-depth: the merge keeps every experience/project from the source
+    by construction, but log (and repair) if that ever drifts so a regression is
+    observable in production rather than silently shipping a dropped role."""
+    se, oe = source.get("experience") or [], out.get("experience") or []
+    if len(se) != len(oe):
+        logger.warning("[tailor] experience count drift: source=%d out=%d", len(se), len(oe))
+    for i, job in enumerate(oe):
+        if i < len(se) and job.get("title") != se[i].get("title"):
+            logger.warning("[tailor] experience identity drift at %d; restoring from source", i)
+            job["title"], job["company"] = se[i].get("title"), se[i].get("company")
+    sp, op = source.get("projects") or [], out.get("projects") or []
+    if len(sp) != len(op):
+        logger.warning("[tailor] project count drift: source=%d out=%d", len(sp), len(op))
+    for i, proj in enumerate(op):
+        if i < len(sp) and proj.get("name") != sp[i].get("name"):
+            logger.warning("[tailor] project name drift at %d; restoring from source", i)
+            proj["name"] = sp[i].get("name")
+
+
+def _best_skill_category(skills: dict, jd_lower: set) -> str:
+    """The category to fold genuinely-missing JD skills into: the one already
+    carrying the most JD-relevant skills (the most 'technical' bucket), tie-broken
+    by size. This keeps skills categorized smartly and NEVER creates a junk
+    'Core Skills' / 'Core Competencies' group."""
+    return max(
+        skills.items(),
+        key=lambda kv: (sum(1 for i in kv[1] if i.lower() in jd_lower), len(kv[1])),
+    )[0]
+
+
 def ensure_skill_coverage(tailored: dict, jd_skills: list) -> list:
-    """Coverage guarantee (the reliable 90%+ lever): make sure every JD hard skill
-    actually appears in the resume. Any still-missing JD skill is added to a
-    'Core Skills' category placed FIRST (where the ATS weights the skills section
-    most), and existing categories are re-ranked so JD skills lead. Auto-added
-    skills are returned so the UI can flag them; they remain fully editable so the
-    user can delete anything they cannot claim.
-    """
+    """Keep EVERY existing skill, re-rank each category so JD-critical skills lead,
+    and fold any still-missing JD hard skill into the most relevant EXISTING
+    category (never a 'Core Skills'/'Core Competencies' junk group). Returns the
+    skills that were added so the UI can flag them; all remain editable."""
     from match import resume_text, contains
 
     skills = tailored.get("skills")
@@ -123,10 +191,10 @@ def ensure_skill_coverage(tailored: dict, jd_skills: list) -> list:
             jd.append(s)
     jd_lower = {s.lower() for s in jd}
 
-    text = resume_text(tailored)
-    missing = [s for s in jd if not contains(s, text)]
+    missing = [s for s in jd if not contains(s, resume_text(tailored))]
 
-    # Re-rank each existing category so JD skills come first (stable order).
+    # Re-rank each existing category so JD skills come first (stable order), keeping
+    # every original skill.
     reranked: dict = {}
     for cat, items in skills.items():
         items = [str(i) for i in (items or []) if str(i).strip()]
@@ -134,55 +202,30 @@ def ensure_skill_coverage(tailored: dict, jd_skills: list) -> list:
         rest = [i for i in items if i.lower() not in jd_lower]
         reranked[str(cat)] = lead + rest
 
-    # Lead with the JD-critical skills (first section/entries carry the most weight).
-    prior_core = reranked.pop("Core Skills", [])
-    missing_lower = {m.lower() for m in missing}
-    core = missing + [x for x in prior_core if x.lower() not in missing_lower]
-    result: dict = {}
-    if core:
-        result["Core Skills"] = core
-    result.update(reranked)
-    tailored["skills"] = result
+    if missing:
+        if reranked:
+            target = _best_skill_category(reranked, jd_lower)
+            have = {x.lower() for x in reranked[target]}
+            reranked[target] = reranked[target] + [m for m in missing if m.lower() not in have]
+        else:
+            reranked["Technical Skills"] = missing
+
+    tailored["skills"] = reranked
     return missing
 
 
-def _floor_for(before: int) -> int:
-    """Tiered target floor based on how well the ORIGINAL resume already matched.
-    A sparse resume is lifted to ~70% (not a fake 100% of stuffed skills); a resume
-    that already has substance can legitimately reach 90%+."""
-    if before < 30:
-        return 72
-    if before < 60:
-        return 87
-    return 92
-
-
 def boost_to_floor(tailored: dict, original: dict, jd_skills: list, jd_keywords: list) -> dict:
-    """Make the after-score reliably high FOR ANY RESUME, returning the final match.
+    """Cover JD skills smartly and return the HONEST match - no score-gaming.
 
-    1. Cover every JD hard skill (must-haves) via ensure_skill_coverage.
-    2. Pick a tiered floor from the original resume's score.
-    3. Inject still-missing JD keywords into a 'Core Competencies' group, ONE AT A
-       TIME, only until the score reaches the floor (or keywords run out). Strong
-       resumes stay naturally high; sparse ones land at the floor, not a stuffed 100%.
+    We fold genuinely-missing JD hard skills into the right category (via
+    ensure_skill_coverage) and report the match as computed. No fake 'Core
+    Competencies' keyword stuffing: an honest score the candidate can stand behind
+    beats an inflated one that wrecks the resume's quality.
     """
     from match import compute_match
 
     ensure_skill_coverage(tailored, jd_skills)
-    m = compute_match(jd_keywords, jd_skills, original, tailored)
-    floor = _floor_for(m["score_before"])
-
-    # missing_after preserves JD order, so we add the highest-priority terms first.
-    for kw in list(m["keywords"]["missing_after"]):
-        if m["score_after"] >= floor:
-            break
-        skills = tailored.get("skills") or {}
-        comp = list(skills.get("Core Competencies", []))
-        comp.append(kw)
-        skills["Core Competencies"] = comp
-        tailored["skills"] = skills
-        m = compute_match(jd_keywords, jd_skills, original, tailored)
-    return m
+    return compute_match(jd_keywords, jd_skills, original, tailored)
 
 
 def tailor(resume: dict, jd_text: str) -> dict:

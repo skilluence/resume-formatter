@@ -169,6 +169,26 @@ def test_title_on_its_own_line():
     assert jobs[0]["bullets"] == ["Did things"]
 
 
+def test_two_jobs_with_title_above_date_line_stay_separate():
+    # Word layout: each role's TITLE sits on its own line, then "Company  Dates".
+    # The second role used to collapse into the first role's bullets ("kept 1 of 2").
+    jobs = S._parse_experience([
+        "Senior Engineer",
+        "Acme Corp\t2022 - Present",
+        "• Led the platform team",
+        "Junior Engineer",
+        "Beta Inc\t2019 - 2021",
+        "• Built internal tools",
+    ])
+    assert len(jobs) == 2
+    assert jobs[0]["title"] == "Senior Engineer"
+    assert jobs[0]["company"] == "Acme Corp"
+    assert jobs[0]["bullets"] == ["Led the platform team"]
+    assert jobs[1]["title"] == "Junior Engineer"
+    assert jobs[1]["company"] == "Beta Inc"
+    assert jobs[1]["bullets"] == ["Built internal tools"]
+
+
 # ── unit: bullets without a glyph ────────────────────────────────────────────
 
 def test_glyphless_bullets_are_not_split_into_projects():

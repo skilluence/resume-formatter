@@ -31,6 +31,9 @@ export interface Project {
   name: string;
   tech_stack: string | null;
   bullets: string[];
+  /* AI Tailor only: the full ranked set of authored bullets (up to 6). `bullets`
+     starts equal to this; the page-fill engine shows the top 2-6 to fit the page. */
+  candidate_bullets?: string[];
 }
 export interface Education {
   degree: string;

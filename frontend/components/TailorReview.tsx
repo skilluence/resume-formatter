@@ -12,7 +12,8 @@ import {
   isCoursework,
 } from "@/lib/resume";
 import SectionCard, { SectionEditor } from "./SectionCard";
-import ResumePreview from "./ResumePreview";
+import ResumePreview, { type FitInfo } from "./ResumePreview";
+import LetterPreview from "./LetterPreview";
 import {
   type TailorDrafts,
   type TailorKind,
@@ -53,6 +54,8 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
   const [editing, setEditing] = useState<string | null>(null);
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
+  // Page-fill result from the live preview (how many project bullets fit, page count).
+  const [fit, setFit] = useState<FitInfo | null>(null);
 
   const setResume = (r: Resume) => setDrafts((d) => ({ ...d, tailored_resume: r }));
 
@@ -62,14 +65,22 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
   const highlightTerms = useMemo(() => highlightTermsFromMatch(drafts.match), [drafts.match]);
   const highlight = useMemo(() => ({ highlightTerms }), [highlightTerms]);
 
-  // The floating match card overlays on wide screens; on narrow it sits inline.
-  const [narrow, setNarrow] = useState(false);
+  // Responsive layout. We track the viewport width and derive two breakpoints:
+  //  • wide  (>=1180): two columns + the match card floats over a right gutter.
+  //  • stack (< 900):  single column — edit rail and preview stack and the whole
+  //                    page scrolls, with a sticky download bar pinned to the
+  //                    bottom of the screen.
+  // Between them: two columns with the match card inline above the preview.
+  const [vw, setVw] = useState(1280);
   useEffect(() => {
-    const f = () => setNarrow(window.innerWidth < 1180);
+    const f = () => setVw(window.innerWidth);
     f();
     window.addEventListener("resize", f);
     return () => window.removeEventListener("resize", f);
   }, []);
+  const wide = vw >= 1180;
+  const stack = vw < 900;
+  const narrow = !wide; // match card sits inline (not floating)
 
   // Section/order helpers (ported from Workspace).
   const sections = getSections(resume);
@@ -107,10 +118,11 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
     setBusy(`${kind}-${format}`);
     try {
       // For the resume, apply the review (skips, GPA, coursework, order) just like
-      // /format does before building.
+      // /format does, then trim project bullets to exactly what the live preview
+      // fitted onto the page so the DOCX matches what's on screen.
       const payload: TailorDrafts =
         kind === "resume"
-          ? { ...drafts, tailored_resume: buildPayload(resume, status, showGpa, orderedBodyIds, showCoursework) }
+          ? { ...drafts, tailored_resume: applyFit(buildPayload(resume, status, showGpa, orderedBodyIds, showCoursework), fit) }
           : drafts;
       await downloadTailorOutput(apiUrl, kind, format, payload, baseName);
     } catch (e) {
@@ -120,9 +132,30 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
     }
   };
 
+  // Responsive style variants (computed from the breakpoints above).
+  const shellR: CSSProperties = stack ? { ...shell, height: "auto", minHeight: "100vh", overflow: "visible" } : shell;
+  const bodyR: CSSProperties = stack ? { ...body, flex: "none", minHeight: 0, display: "block" } : body;
+  const tabBarR: CSSProperties = stack ? { ...tabBar, overflowX: "auto" } : tabBar;
+  const twoColR: CSSProperties = stack ? { display: "flex", flexDirection: "column" } : twoCol;
+  const editColR: CSSProperties = stack
+    ? { ...editCol, width: "100%", overflowY: "visible", borderRight: "none", borderTop: `1px solid ${tk.borderTertiary}`, order: 2, padding: "18px clamp(14px,4vw,20px) 100px" }
+    : editCol;
+  const previewColR: CSSProperties = stack
+    ? { ...previewCol, overflowY: "visible", order: 1, padding: "16px clamp(12px,4vw,20px) 24px" }
+    : narrow ? previewCol : { ...previewCol, paddingRight: "336px" };
+  const scrollPaneR: CSSProperties = stack ? { ...scrollPane, overflowY: "visible", flex: "none" } : scrollPane;
+  // Cover-letter tab: editor + live preview, two columns (stack on mobile, preview first).
+  const letterColsR: CSSProperties = stack ? { display: "flex", flexDirection: "column" } : twoCol;
+  const letterEditR: CSSProperties = stack
+    ? { ...editCol, width: "100%", overflowY: "visible", borderRight: "none", borderTop: `1px solid ${tk.borderTertiary}`, order: 2, padding: "18px clamp(14px,4vw,20px) 100px" }
+    : editCol;
+  const letterPreviewR: CSSProperties = stack
+    ? { ...previewCol, overflowY: "visible", order: 1, padding: "16px clamp(12px,4vw,20px) 24px" }
+    : previewCol;
+
   return (
-    <div style={shell}>
-      <Header onStartOver={onStartOver} />
+    <div style={shellR}>
+      <Header onStartOver={onStartOver} style={stack ? { position: "sticky", top: 0 } : undefined} />
       <div style={betaBanner}>
         <span style={betaPill}>BETA</span>
         <span style={{ fontSize: "13px", color: tk.onSurfaceSecondary }}>
@@ -130,7 +163,7 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
         </span>
       </div>
 
-      <div style={tabBar}>
+      <div style={tabBarR}>
         <TabBtn active={tab === "resume"} onClick={() => setTab("resume")}>Resume</TabBtn>
         <TabBtn active={tab === "cover_letter"} onClick={() => setTab("cover_letter")}>Cover letter</TabBtn>
         <TabBtn active={tab === "email"} onClick={() => setTab("email")}>HR email</TabBtn>
@@ -138,11 +171,11 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
 
       {err && <p style={errStyle}>{err}</p>}
 
-      <div style={body}>
+      <div style={bodyR}>
         {tab === "resume" && (
-          <div style={twoCol}>
-            {/* LEFT: the same section-card review rail as /format */}
-            <aside style={editCol}>
+          <div style={twoColR}>
+            {/* LEFT (RIGHT-on-mobile): the same section-card review rail as /format */}
+            <aside style={editColR}>
               <ResumeRail
                 resume={resume}
                 summaryMeta={summaryMeta}
@@ -154,6 +187,7 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
                 editing={editing}
                 dragId={dragId}
                 busy={busy}
+                hideDownload={stack}
                 onChange={setResume}
                 onKeep={(id) => setStatus(id, "kept")}
                 onSkip={skip}
@@ -168,15 +202,18 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
             </aside>
             {/* CENTER: full-width live preview with neon-green change highlights.
                 On wide screens we reserve a right gutter so the floating card never covers the page. */}
-            <div style={narrow ? previewCol : { ...previewCol, paddingRight: "336px" }}>
-              {narrow && <div style={{ marginBottom: "14px", maxWidth: "820px", marginLeft: "auto", marginRight: "auto" }}><MatchCard match={drafts.match} changes={drafts.changes} /></div>}
-              <span style={previewLabel}>Live preview</span>
+            <div style={previewColR}>
+              {narrow && <div style={{ marginBottom: "14px", maxWidth: "820px", marginLeft: "auto", marginRight: "auto", width: "100%" }}><MatchCard match={drafts.match} changes={drafts.changes} compact /></div>}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
+                <span style={{ ...previewLabel, marginBottom: 0 }}>Live preview</span>
+                <FitChip fit={fit} />
+              </div>
               <div style={previewFrame}>
-                <ResumePreview resume={resume} status={status} showGpa={showGpa} sectionOrder={orderedBodyIds} showCoursework={showCoursework} highlight={highlight} />
+                <ResumePreview resume={resume} status={status} showGpa={showGpa} sectionOrder={orderedBodyIds} showCoursework={showCoursework} highlight={highlight} fitToPages onFit={setFit} />
               </div>
             </div>
             {/* Floating JD-match card, pinned to the middle-right (wide screens). */}
-            {!narrow && (
+            {wide && (
               <div style={floatWrap}>
                 <MatchCard match={drafts.match} changes={drafts.changes} floating />
               </div>
@@ -185,16 +222,37 @@ export default function TailorReview({ drafts: initial, apiUrl, onStartOver }: P
         )}
 
         {tab === "cover_letter" && (
-          <div style={scrollPane}>
-            <LetterPanel drafts={drafts} onChange={(cl) => setDrafts((d) => ({ ...d, cover_letter: cl }))} onDownload={download} busy={busy} />
+          <div style={letterColsR}>
+            <aside style={letterEditR}>
+              <LetterPanel drafts={drafts} onChange={(cl) => setDrafts((d) => ({ ...d, cover_letter: cl }))} onDownload={download} busy={busy} />
+            </aside>
+            <div style={letterPreviewR}>
+              <span style={previewLabel}>Live preview</span>
+              <div style={previewFrame}>
+                <LetterPreview name={resume.name} headline={resume.headline} contact={resume.contact} letter={drafts.cover_letter} />
+              </div>
+            </div>
           </div>
         )}
         {tab === "email" && (
-          <div style={scrollPane}>
+          <div style={scrollPaneR}>
             <EmailPanel drafts={drafts} onChange={(em) => setDrafts((d) => ({ ...d, email: em }))} onDownload={download} busy={busy} />
           </div>
         )}
       </div>
+
+      {/* Mobile: a sticky bottom bar keeps the resume download one tap away
+          without scrolling past the whole preview to reach the rail. */}
+      {stack && tab === "resume" && (
+        <div style={mobileDlBar}>
+          <button type="button" disabled={!!busy} onClick={() => download("resume", "docx")} style={{ ...dlBtn(true), flex: 1, padding: "12px" }}>
+            {busy === "resume-docx" ? "…" : "↓ DOCX"}
+          </button>
+          <button type="button" disabled={!!busy} onClick={() => download("resume", "pdf")} style={{ ...dlBtn(false), flex: 1, padding: "12px" }}>
+            {busy === "resume-pdf" ? "…" : "↓ PDF"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -211,6 +269,7 @@ interface RailProps {
   editing: string | null;
   dragId: string | null;
   busy: string;
+  hideDownload?: boolean;
   onChange: (r: Resume) => void;
   onKeep: (id: string) => void;
   onSkip: (id: string) => void;
@@ -243,18 +302,21 @@ function ResumeRail(p: RailProps) {
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-      {/* Download bar pinned to the top of the rail */}
-      <div style={dlCard}>
-        <span style={{ fontSize: "12px", color: tk.onSurfaceTertiary, display: "block", marginBottom: "8px" }}>Download tailored resume</span>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button type="button" disabled={!!p.busy} onClick={() => p.onDownload("resume", "docx")} style={{ ...dlBtn(true), flex: 1 }}>
-            {p.busy === "resume-docx" ? "…" : "↓ DOCX"}
-          </button>
-          <button type="button" disabled={!!p.busy} onClick={() => p.onDownload("resume", "pdf")} style={{ ...dlBtn(false), flex: 1 }}>
-            {p.busy === "resume-pdf" ? "…" : "↓ PDF"}
-          </button>
+      {/* Download bar pinned to the top of the rail (hidden on mobile, where a
+          sticky bottom bar handles the resume download instead). */}
+      {!p.hideDownload && (
+        <div style={dlCard}>
+          <span style={{ fontSize: "12px", color: tk.onSurfaceTertiary, display: "block", marginBottom: "8px" }}>Download tailored resume</span>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button type="button" disabled={!!p.busy} onClick={() => p.onDownload("resume", "docx")} style={{ ...dlBtn(true), flex: 1 }}>
+              {p.busy === "resume-docx" ? "…" : "↓ DOCX"}
+            </button>
+            <button type="button" disabled={!!p.busy} onClick={() => p.onDownload("resume", "pdf")} style={{ ...dlBtn(false), flex: 1 }}>
+              {p.busy === "resume-pdf" ? "…" : "↓ PDF"}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* name & headline editor */}
       <div style={cardStyle}>
@@ -301,6 +363,7 @@ function ResumeRail(p: RailProps) {
       <p style={hint}>
         Facts (name, contact, employers, dates, education, certifications) come straight from your resume.
         Edit any section above; the preview updates live. Skipped sections are dropped from the download.
+        Project bullets auto-trim to fill the page cleanly — the live preview shows exactly what downloads.
       </p>
     </div>
   );
@@ -378,6 +441,37 @@ function EmailPanel({ drafts, onChange, onDownload, busy }: {
   );
 }
 
+/* Trim each project's bullets to the count the live preview fitted onto the page,
+   and rebuild each project with only name/tech_stack/bullets so the helper
+   `candidate_bullets` field never reaches the DOCX. The DOCX then matches the
+   preview exactly. */
+function applyFit(resume: Resume, fit: FitInfo | null): Resume {
+  const counts = fit?.fittedCounts;
+  return {
+    ...resume,
+    projects: resume.projects.map((p, i) => {
+      const n = counts && typeof counts[i] === "number" ? counts[i] : p.bullets.length;
+      return { name: p.name, tech_stack: p.tech_stack, bullets: p.bullets.slice(0, n) };
+    }),
+  };
+}
+
+/* A small chip showing the live page count + how full the last page is, so the
+   user can see the resume land on a clean 1 / 1.5 / 2 / 2.5 / 3-page boundary. */
+function FitChip({ fit }: { fit: FitInfo | null }) {
+  if (!fit || !fit.pages) return null;
+  const onBoundary = fit.lastFillPct >= 88 || (fit.lastFillPct >= 40 && fit.lastFillPct <= 62);
+  const over = fit.pages > 3;
+  const bg = over ? "#fdecea" : onBoundary ? tk.greenSurface : "#fbf0db";
+  const fg = over ? tk.red : onBoundary ? tk.green : "#9a6a1a";
+  const label = `${fit.pages} page${fit.pages > 1 ? "s" : ""} · last page ${fit.lastFillPct}% full${over ? " · over 3 pages" : ""}`;
+  return (
+    <span style={{ fontSize: "11.5px", fontWeight: 600, color: fg, background: bg, padding: "3px 10px", borderRadius: "999px", whiteSpace: "nowrap" }}>
+      {label}
+    </span>
+  );
+}
+
 /* ── shared bits ─────────────────────────────────────────────────────────── */
 function DownloadRow({ kind, label, onDownload, busy, extra }: {
   kind: TailorKind; label: string; onDownload: (k: TailorKind, f: DownloadFormat) => void; busy: string; extra?: React.ReactNode;
@@ -406,18 +500,19 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} style={{
-      padding: "9px 18px", fontSize: "14px", fontWeight: 600, cursor: "pointer", background: "none", border: "none",
+      padding: "9px clamp(12px,3vw,18px)", fontSize: "14px", fontWeight: 600, cursor: "pointer", background: "none", border: "none",
       color: active ? tk.onSurface : tk.onSurfaceTertiary, borderBottom: `2px solid ${active ? tk.clayInteractive : "transparent"}`,
+      flexShrink: 0, whiteSpace: "nowrap",
     }}>{children}</button>
   );
 }
-function Header({ onStartOver }: { onStartOver: () => void }) {
+function Header({ onStartOver, style }: { onStartOver: () => void; style?: CSSProperties }) {
   return (
-    <header style={headerStyle}>
-      <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none" }}>
-        <span style={{ fontFamily: tk.serif, fontSize: "17px", fontWeight: 500, color: tk.onSurface }}>Resume Formatter</span>
+    <header style={{ ...headerStyle, ...style }}>
+      <Link href="/" style={{ display: "flex", alignItems: "center", gap: "10px", textDecoration: "none", minWidth: 0 }}>
+        <span style={{ fontFamily: tk.serif, fontSize: "17px", fontWeight: 500, color: tk.onSurface, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Resume Formatter</span>
       </Link>
-      <button type="button" onClick={onStartOver} style={{ marginLeft: "auto", ...ghostInline }}>← Tailor another</button>
+      <button type="button" onClick={onStartOver} style={{ marginLeft: "auto", flexShrink: 0, ...ghostInline }}>← Tailor another</button>
     </header>
   );
 }
@@ -425,7 +520,7 @@ function Header({ onStartOver }: { onStartOver: () => void }) {
 /* ── MatchCard: the floating JD-match card (gauge + "what changed" + counts).
    Refined within the app's warm palette: layered shadow, a conic score ring that
    sweeps in on mount, and a tight change-log. ─────────────────────────────── */
-function MatchCard({ match, changes, floating }: { match: MatchInfo; changes: string[]; floating?: boolean }) {
+function MatchCard({ match, changes, floating, compact }: { match: MatchInfo; changes: string[]; floating?: boolean; compact?: boolean }) {
   const after = match?.score_after ?? 0;
   const before = match?.score_before ?? 0;
   const delta = after - before;
@@ -434,6 +529,7 @@ function MatchCard({ match, changes, floating }: { match: MatchInfo; changes: st
   const skillsAdded = match?.skills?.added?.length || 0;
   const kwAdded = match?.keywords?.added?.length || 0;
   const R = 34, C = 2 * Math.PI * R;
+  const [open, setOpen] = useState(false);
 
   // Sweep the ring from empty to `after%` on mount.
   const [drawn, setDrawn] = useState(0);
@@ -441,6 +537,64 @@ function MatchCard({ match, changes, floating }: { match: MatchInfo; changes: st
     const id = requestAnimationFrame(() => setDrawn(after));
     return () => cancelAnimationFrame(id);
   }, [after]);
+
+  // ── Compact horizontal bar (inline / mobile): the score reads in one row and
+  //    "what changed" collapses, so the live preview stays the hero. ──────────
+  if (compact) {
+    const cR = 24, cC = 2 * Math.PI * cR;
+    return (
+      <section style={compactCard} aria-label="JD match score">
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <div style={{ position: "relative", width: "58px", height: "58px", flexShrink: 0 }}>
+            <svg width="58" height="58" viewBox="0 0 58 58" aria-hidden>
+              <circle cx="29" cy="29" r={cR} fill="none" stroke={tk.borderTertiary} strokeWidth="6" />
+              <circle cx="29" cy="29" r={cR} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={cC} strokeDashoffset={cC - (drawn / 100) * cC} transform="rotate(-90 29 29)"
+                style={{ transition: "stroke-dashoffset 0.9s cubic-bezier(0.22,1,0.36,1)" }} />
+            </svg>
+            <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <b style={{ fontFamily: tk.serif, fontSize: "18px", fontWeight: 600, color }}>{after}<span style={{ fontSize: "10px" }}>%</span></b>
+            </span>
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: "0.08em", color: tk.onSurfaceTertiary }}>JD MATCH</span>
+              <span style={{ fontSize: "10px", fontWeight: 700, color: "#fff", background: color, padding: "2px 8px", borderRadius: "999px" }}>{grade}</span>
+            </div>
+            <div style={{ fontSize: "14px", color: tk.onSurfaceSecondary, marginTop: "3px" }}>
+              <span style={{ color: tk.onSurfaceTertiary }}>{before}%</span>
+              <span style={{ color: tk.onSurfaceGhost, margin: "0 5px" }}>→</span>
+              <b style={{ color }}>{after}%</b>
+              {delta > 0 && <span style={{ marginLeft: "8px", fontSize: "11px", fontWeight: 700, color: tk.green, background: tk.greenSurface, padding: "2px 7px", borderRadius: "6px", whiteSpace: "nowrap" }}>▲ +{delta} pts</span>}
+            </div>
+            {(skillsAdded > 0 || kwAdded > 0) && (
+              <div style={{ fontSize: "10.5px", color: tk.onSurfaceTertiary, marginTop: "4px" }}>
+                +{skillsAdded} skills · +{kwAdded} keywords · added terms <span style={{ ...chipNeon, padding: "0 4px", fontSize: "10px" }}>highlighted</span> below
+              </div>
+            )}
+          </div>
+        </div>
+        {changes?.length > 0 && (
+          <>
+            <button type="button" onClick={() => setOpen((o) => !o)} style={changeToggle} aria-expanded={open}>
+              <span>{open ? "Hide what changed" : `What changed (${changes.length})`}</span>
+              <span aria-hidden>{open ? "▴" : "▾"}</span>
+            </button>
+            {open && (
+              <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                {changes.slice(0, 6).map((c, i) => (
+                  <li key={i} style={{ display: "flex", gap: "8px", fontSize: "12.5px", color: tk.onSurfaceSecondary, lineHeight: 1.45 }}>
+                    <span style={{ color: tk.green, flexShrink: 0, fontWeight: 700 }}>✓</span>
+                    <span>{c}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section style={floating ? { ...matchCard, ...matchCardFloating } : matchCard} aria-label="JD match score">
@@ -510,13 +664,19 @@ const chipNeon: CSSProperties = { fontSize: "11px", color: "#2d3a00", background
 const tabBar: CSSProperties = { flexShrink: 0, display: "flex", gap: "8px", padding: "10px clamp(16px,4vw,28px) 0", borderBottom: `1px solid ${tk.borderTertiary}` };
 const body: CSSProperties = { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" };
 // 2 columns: left edit rail · full-width preview. The match card floats over the right gutter.
-const twoCol: CSSProperties = { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "clamp(380px,38%,560px) 1fr" };
+// The rail is kept lean so the live preview (the hero) gets as much width as possible.
+const twoCol: CSSProperties = { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "clamp(340px,33%,480px) minmax(0,1fr)" };
 const editCol: CSSProperties = { minWidth: 0, overflowY: "auto", padding: "16px clamp(14px,2vw,20px) 40px", borderRight: `1px solid ${tk.borderTertiary}`, background: tk.surfaceSecondary };
 const previewCol: CSSProperties = { minWidth: 0, overflowY: "auto", padding: "16px clamp(16px,2vw,28px) 40px", background: "#e9e7df", display: "flex", flexDirection: "column", position: "relative" };
 const previewLabel: CSSProperties = { fontSize: "12px", color: tk.onSurfaceSecondary, fontWeight: 600, paddingTop: "4px", marginBottom: "10px" };
 // Floating match card: fixed to the right gutter, vertically centered, never covers the page.
 const floatWrap: CSSProperties = { position: "fixed", right: "24px", top: "calc(50% + 30px)", transform: "translateY(-50%)", zIndex: 30, pointerEvents: "none" };
+// Mobile-only sticky download bar (resume tab) — pinned to the bottom of the screen.
+const mobileDlBar: CSSProperties = { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50, display: "flex", gap: "10px", padding: "10px clamp(14px,4vw,20px)", background: "color-mix(in srgb, #faf9f5 94%, transparent)", backdropFilter: "saturate(180%) blur(10px)", WebkitBackdropFilter: "saturate(180%) blur(10px)", borderTop: `1px solid ${tk.borderSecondary}`, boxShadow: "0 -4px 18px rgba(20,20,19,0.07)" };
 const matchCard: CSSProperties = { background: "#fff", border: `1px solid ${tk.borderSecondary}`, borderRadius: "16px", padding: "16px 16px 14px", boxShadow: "0 4px 16px rgba(20,20,19,0.07)" };
+// Compact horizontal match bar (inline / mobile) — kept short so the preview leads.
+const compactCard: CSSProperties = { background: "#fff", border: `1px solid ${tk.borderSecondary}`, borderRadius: "14px", padding: "12px 14px", boxShadow: "0 2px 10px rgba(20,20,19,0.05)" };
+const changeToggle: CSSProperties = { marginTop: "10px", width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", background: tk.surfaceSecondary, border: `1px solid ${tk.borderTertiary}`, borderRadius: "8px", padding: "7px 11px", fontFamily: tk.sans, fontSize: "12.5px", fontWeight: 600, color: tk.onSurfaceSecondary, cursor: "pointer" };
 const matchCardFloating: CSSProperties = { width: "300px", maxWidth: "26vw", pointerEvents: "auto", boxShadow: "0 18px 50px -12px rgba(20,20,19,0.28), 0 4px 12px rgba(20,20,19,0.08)", animation: "rf-fade 0.5s cubic-bezier(0.22,1,0.36,1) both" };
 const matchCardHeader: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" };
 const previewFrame: CSSProperties = { width: "100%", maxWidth: "820px", margin: "0 auto" };

@@ -454,12 +454,52 @@ def _is_job_header(line: str) -> bool:
     return len(rest.split()) <= 16
 
 
+def _merge_title_date_lines(body: list) -> list:
+    """Word layouts often put the job TITLE on its own line and the COMPANY+DATES
+    on the next line. With no date of its own, the title line never opens a new
+    entry, so a later role collapses into the previous job's bullets ("kept 1 of
+    2"). Join such a pair with a tab so the dated line anchors one header that
+    _is_job_header recognises, and _parse_single_job_line splits title/company on
+    the tab. Only fires on a short, capitalised, date-less line IMMEDIATELY above a
+    dated header line - the common-case inline header has no such dangling line, so
+    its output is unchanged."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        line, nxt = body[i], (body[i + 1] if i + 1 < n else None)
+        if (
+            nxt is not None
+            and not _is_bullet(line)
+            and not _starts_lower(line)
+            and not _DATE_RANGE_RE.search(line)
+            and len(line.split()) <= 8
+            and not _is_bullet(nxt)
+            and _is_job_header(nxt)
+        ):
+            # Join with a pipe (a strong field separator) rather than a tab: a tab
+            # adjacent to the removed date is collapsed by _extract_date_range, but
+            # a pipe survives, so title/company split cleanly.
+            out.append(line.rstrip() + " | " + nxt.strip())
+            i += 2
+        else:
+            out.append(line)
+            i += 1
+    return out
+
+
 def _parse_experience(body: list) -> list:
     jobs = []
-    for entry in _iter_entries(body, _is_job_header):
+    for entry in _iter_entries(_merge_title_date_lines(body), _is_job_header):
         job = _parse_job_header(entry["header"])
         job["bullets"] = entry["bullets"]
         jobs.append(job)
+    # Integrity signal (log only, never changes output): more dated header-looking
+    # lines than parsed jobs means a role may have collapsed into another's bullets.
+    dated_headers = sum(1 for l in body if not _is_bullet(l) and _is_job_header(l))
+    if dated_headers > len(jobs):
+        logger.warning(
+            "[structurer] experience: %d dated header line(s) but %d job(s) parsed - a role may have collapsed",
+            dated_headers, len(jobs),
+        )
     return jobs
 
 

@@ -308,8 +308,10 @@ async def tailor_resume(
             detail="Paste the job description (or a job link we can read) so we can tailor to it.",
         )
 
-    from structurer import structure_resume
-    resume = structure_resume(raw_text)
+    # /tailor uses robust LLM extraction (handles any layout, then fact-validates
+    # so it can't invent or lose an entry). /format keeps the deterministic parser.
+    from llm.extract import extract_resume
+    resume = extract_resume(raw_text)
 
     from llm.tailor import tailor
     try:
@@ -335,6 +337,7 @@ def _render_tailor_docx(req: "TailorBuildRequest", path: str):
         format_cover_letter(
             {
                 "name": req.tailored_resume.get("name", ""),
+                "headline": req.tailored_resume.get("headline", ""),
                 "contact": req.tailored_resume.get("contact", {}),
                 "cover_letter": req.cover_letter,
             },

@@ -8,7 +8,7 @@ Guidance for AI agents working in this repository.
 
 > **The `/format` flow is No-AI, no key.** Earlier versions used GPT-4o-mini to structure resumes; that step was replaced with deterministic Python rules so the output can only ever contain words from the source. The core formatter has no network call and needs no key.
 >
-> **`/tailor` (beta) is a SEPARATE, opt-in AI feature.** It uses OpenAI to rewrite a resume for a job description and draft a cover letter + HR email. It is clearly labeled "AI-drafted", lives in its own page/endpoints, and **never touches the `/format` guarantee.** Even there, facts (name, contact, employers, titles, dates, education, certifications) are re-stamped from the source in `llm/tailor.py` so the model can only reword bullets/summary/skills/projects — it can never alter a fact, and unknown numbers come back as editable `[placeholders]`, never fabricated. Needs `OPENAI_API_KEY` in `backend/.env` (gitignored); optional `OPENAI_MODEL` (default `gpt-4o-mini`) and `FIRECRAWL_API_KEY` (better job-URL scraping).
+> **`/tailor` (beta) is a SEPARATE, opt-in AI feature.** It uses OpenAI to rewrite a resume for a job description and draft a cover letter + HR email. It is clearly labeled "AI-drafted", lives in its own page/endpoints, and **never touches the `/format` guarantee.** Even there, facts (name, contact, employers, titles, dates, education, certifications) are re-stamped from the source in `llm/tailor.py` so the model can only reword bullets/summary/skills/projects — it can never alter a fact. **Every experience AND every project is preserved 1:1 by source identity** (titles/names re-stamped, never dropped, renamed, reordered, or capped). Bullets are **qualitative** — no fabricated metrics and no `[placeholders]` (the only digits allowed are ones already in the source). Each experience is normalized to **exactly 6 bullets** (the model condenses >6 source bullets into 6, or synthesizes up to 6 grounded in the role/skills/projects); each project carries **2–6 ranked bullets**, and the frontend page-fill engine (`lib/fit.ts` + `ResumePreview`) shows the top 2–6 per project so the resume lands on a clean 1 / 1.5 / 2 / 2.5 / 3-page boundary. Needs `OPENAI_API_KEY` in `backend/.env` (gitignored); optional `OPENAI_MODEL` (default `gpt-4o-mini`) and `FIRECRAWL_API_KEY` (better job-URL scraping).
 
 Monorepo:
 - `frontend/` — Next.js 14 (App Router, TypeScript, Tailwind v4). Deployed on **Vercel**.
@@ -52,12 +52,13 @@ Two phases: parse + structure first (no file written), then build after the user
 | File | Responsibility |
 |------|----------------|
 | `backend/llm/client.py` | OpenAI client + model from env (`OPENAI_API_KEY`, `OPENAI_MODEL`) |
-| `backend/llm/prompts.py` | Prompt spec (6 exp bullets, 2 projects, ATS skills, 100-word summary, `**bold**`, `[placeholders]`, no em dashes) |
-| `backend/llm/tailor.py` | `tailor(resume, jd)` → drafts; **re-stamps facts from source** so the model can't alter them |
+| `backend/llm/prompts.py` | Prompt spec: exactly 6 bullets/experience (condense or synthesize), every project preserved with 2–6 ranked bullets, categorized ATS skills, 3–4 line summary (+`summary_short`), `**bold**`, **qualitative only — no invented numbers / no `[placeholders]`**, no em dashes |
+| `backend/llm/tailor.py` | `tailor(resume, jd)` → drafts; **re-stamps facts from source** and preserves every experience AND project 1:1 (`_merge_resume` merges by source index, names/titles from source; `_assert_identity_preserved` guards drift; caps experience at 6 bullets, emits `candidate_bullets` per project) |
 | `backend/jd_scraper.py` | `fetch_jd(url)` — httpx+BeautifulSoup, Firecrawl if `FIRECRAWL_API_KEY` set; "" on failure (UI falls back to paste) |
 | `backend/formatters/letter.py` | Cover letter + HR email DOCX (letterhead, clickable email/LinkedIn, `**bold**`) |
 | `backend/main.py` | `POST /tailor`, `POST /tailor/build`, `GET /tailor/status` |
-| `frontend/app/tailor/page.tsx` · `components/TailorWorkspace.tsx` · `components/TailorReview.tsx` · `lib/tailor.ts` | `/tailor` page: input → editable 3-tab review → DOCX/PDF download |
+| `frontend/lib/fit.ts` | Pure page-fill engine: pack blocks → score boundary → pick 2–6 bullets/project to land on a clean 1/1.5/2/2.5/3-page boundary (≤3 pages). Driven by real height measurement in `ResumePreview` (US-Letter geometry) when `fitToPages` is set; `/format` leaves it off and shows every bullet |
+| `frontend/app/tailor/page.tsx` · `components/TailorWorkspace.tsx` · `components/TailorReview.tsx` · `lib/tailor.ts` | `/tailor` page: input → editable 3-tab review → DOCX/PDF download. Resume tab shows a page-fill chip; download trims project bullets (`applyFit`) to match the preview |
 
 `compact_ats.py` gained `_add_rich_runs` for `**bold**` markup — a **no-op for `/format`** (rule output never contains `**`), so existing DOCX output is byte-identical.
 

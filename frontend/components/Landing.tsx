@@ -17,9 +17,9 @@ export default function Landing() {
           <Asterisk />
           <span style={{ fontFamily: tk.serif, fontSize: "17px", fontWeight: 500, color: tk.onSurface, letterSpacing: "-0.01em" }}>Resume Formatter</span>
         </Link>
-        <nav style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "20px" }}>
-          <a href="#how" style={navLink}>How it works</a>
-          <Link href="/tailor" style={navLink}>Tailor to a job <sup style={{ fontSize: "9px", color: tk.clay, fontWeight: 700 }}>BETA</sup></Link>
+        <nav style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "clamp(12px,3vw,20px)" }}>
+          <a href="#how" style={navLink} className="lp-hide-sm">How it works</a>
+          <Link href="/tailor" style={navLink} className="lp-hide-xs">Tailor to a job <sup style={{ fontSize: "9px", color: tk.clay, fontWeight: 700 }}>BETA</sup></Link>
           <Link href="/format" style={ctaSmall}>Format a resume →</Link>
         </nav>
       </header>

@@ -24,7 +24,7 @@ BODY_SIZE = Pt(9)
 HEADER_SIZE = Pt(9.5)
 MARGIN = Inches(0.20)
 COBALT_BLUE = RGBColor(0, 71, 171)
-HEADLINE_GRAY = RGBColor(80, 80, 80)
+HEADLINE_GRAY = RGBColor(80, 80, 80) 
 
 # US Letter page (8.5 in wide) — the US-market standard this product targets.
 # Right-align tab stops sit at the page width minus the two side margins,
